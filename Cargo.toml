@@ -1,8 +1,15 @@
 [package]
-name = "TunePulse-RS"
+name = "tunepulse_rs"
 version = "0.1.0"
 edition = "2021"
+license = "Apache-2.0"
+description = "Universl motor controller firmware"
+homepage = "https://creapunk.com"
+
+[package.metadata]
+authors = ["Anton Khrustalev"]
 
 [dependencies]
 rand = "0.8"
 plotters = "0.3"
+

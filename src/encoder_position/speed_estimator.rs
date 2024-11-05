@@ -16,7 +16,7 @@ impl SpeedEstimator {
         Self {
             freq,
             speed: 0,
-            pos_buffer: [init_position; SpeedEstimator::SIZE],
+            pos_buffer: [init_position; SIZE],
             idx: 0,
         }
     }
@@ -27,13 +27,13 @@ impl SpeedEstimator {
         let difference = new_position - self.pos_buffer[self.idx];
 
         // Calculate speed based on sampling frequency (corrected to buffer size)
-        self.speed = (difference * self.freq as i32) / SpeedEstimator::SIZE as i32;
+        self.speed = (difference * self.freq as i32) / SIZE as i32;
 
         // Update buffer
         self.pos_buffer[self.idx] = new_position;
 
         // Update index value
-        self.idx = (self.idx + 1) % SpeedEstimator::SIZE;
+        self.idx = (self.idx + 1) % SIZE;
     }
 
     // Getter for instant speed

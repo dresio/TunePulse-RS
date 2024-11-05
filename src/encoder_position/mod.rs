@@ -1,27 +1,26 @@
-mod angle_filter;
-use angle_filter::AngleFilter;
+use crate::math_integer::filters::lpf::FilterLPF;
 
-mod speed_estimator;
-use speed_estimator::SpeedEstimator;
+pub mod speed_estimator;
+use self::speed_estimator::SpeedEstimator;
 
-/// EncoderPositionHandler manages and calculates the absolute position and speed of the encoder.
-pub struct EncoderPositionHandler {
+/// EncoderPosition manages and calculates the absolute position and speed of the encoder.
+pub struct EncoderPosition {
     position: i32,                   // Combined value (rotations + angle)
     rotations: i16,                  // Full rotations count
     angle: u16,                      // Shaft angle
     pub alpha: u8,                   // Filtering coefficient (0 <..> 255)
-    filter: AngleFilter,             // Position filter instance
+    filter: FilterLPF,             // Position filter instance
     speed_estimator: SpeedEstimator, // Speed estimator instance
     prev_sector: i16,                // Previous angle for zero-cross detection
 }
 
-impl EncoderPositionHandler {
+impl EncoderPosition {
     /// Creates new encoder handler instance
     pub fn new(raw_angle: u16, freq: u16, alpha: u8) -> Self {
         // Set zero position as beginning
         let init_position = (raw_angle as u32) as i32;
         // Init filter with input values as default
-        let filter = AngleFilter::new(raw_angle, alpha);
+        let filter = FilterLPF::new(raw_angle, alpha);
         // Init speed estimator with input values as default
         let speed_estimator = SpeedEstimator::new(init_position, freq);
         Self {
@@ -38,7 +37,7 @@ impl EncoderPositionHandler {
     /// Updates the encoder state, including position filtering, zero-cross detection, and speed estimation.
     pub fn tick(&mut self, input_pos: u16) {
         // Update filter value
-        self.filter.tick(input_pos);
+        self.filter.tick_oflw(input_pos);
 
         // Update current angle based on filtered value
         self.angle = self.filter.get_output();

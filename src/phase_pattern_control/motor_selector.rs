@@ -5,14 +5,13 @@ pub struct VectorAxes2I16 {
     pub cos: i16, // Cosine component
 }
 
-
 // Class to handle different types of motor controls
 pub struct MotorSelector {
     pub voltg: VectorAxes2I16, // Input for alpha component of voltage
-    pub voltg_sup: i16,          // Input for supply voltage
-    pub voltg_brak: i16,         // Input for brake voltage
-    pub mode: MotorType,         // Input for motor type mode
-    ch_abcd: [i16; 4], // Array to store voltages for four channels
+    pub voltg_sup: i16,        // Input for supply voltage
+    pub voltg_brak: i16,       // Input for brake voltage
+    pub mode: MotorType,       // Input for motor type mode
+    ch_abcd: [i16; 4],         // Array to store voltages for four channels
 }
 
 impl MotorSelector {
@@ -47,12 +46,7 @@ impl MotorSelector {
         return (voltg_a, voltg_b);
     }
 
-    fn math_svpwm(
-        &mut self,
-        voltg_sin: i16,
-        voltg_cos: i16,
-        voltg_available: i16,
-    ) -> (i16, i16, i16) {
+    fn math_svpwm(voltg_sin: i16, voltg_cos: i16, voltg_available: i16) -> (i16, i16, i16) {
         let voltg_sin = voltg_sin as i32;
         let voltg_cos: i32 = voltg_cos as i32;
         let voltg_available: i32 = voltg_available as i32;
@@ -100,12 +94,22 @@ impl MotorSelector {
             voltg_offset = (voltg_available - voltg_max - voltg_min) >> 1;
         }
 
-        // Shift all phase voltages by reference voltage
-        voltg_a += voltg_offset;
-        voltg_b += voltg_offset;
-        voltg_c += voltg_offset;
+        // If zero voltage is required - activate maximum brake
+        if voltg_full_scale != 0 {
+            // Shift all phase voltages by reference voltage
+            voltg_a += voltg_offset;
+            voltg_b += voltg_offset;
+            voltg_c += voltg_offset;
+        }
 
         return (voltg_a as i16, voltg_b as i16, voltg_c as i16);
+    }
+
+    /// Function to handle one-phase motor control
+    #[inline(always)]
+    fn tick0phase(&mut self) {
+        // Set single phase to brake voltage, other - zeros
+        self.ch_abcd = [self.voltg_brak, 0, 0, 0];
     }
 
     /// Function to handle one-phase motor control
@@ -128,7 +132,7 @@ impl MotorSelector {
     #[inline(always)]
     fn tick3phase(&mut self) {
         (self.ch_abcd[0], self.ch_abcd[1], self.ch_abcd[2]) =
-            self.math_svpwm(self.voltg.sin, self.voltg.cos, self.voltg_sup);
+            Self::math_svpwm(self.voltg.sin, self.voltg.cos, self.voltg_sup);
         // Set unused phase to brake voltage (optional)
         self.ch_abcd[3] = self.voltg_brak;
     }
@@ -136,6 +140,7 @@ impl MotorSelector {
     // Function to update motor control based on mode
     pub fn tick(&mut self) {
         match self.mode {
+            MotorType::UNDEFINED => self.tick0phase(),
             MotorType::DC => self.tick1phase(),
             MotorType::STEPPER => self.tick2phase(),
             MotorType::BLDC => self.tick3phase(),
@@ -146,17 +151,13 @@ impl MotorSelector {
     pub fn pwm_channels(&self) -> [i16; 4] {
         self.ch_abcd
     }
-
-    // Function to directly set voltage channels - DO NOT USE SIMULTANEOUSLY WITH tick()
-    pub fn dev(&mut self, voltages: [i16; 4]) {
-        self.ch_abcd.copy_from_slice(&voltages);
-    }
 }
 
 #[derive(Debug, Clone, Copy)]
 // Enumeration for motor types
 pub enum MotorType {
-    DC,      // Direct Current motor
-    STEPPER, // Stepper motor
-    BLDC,    // Brushless DC motor
+    UNDEFINED, // No motor type selected
+    DC,        // Direct Current motor
+    STEPPER,   // Stepper motor
+    BLDC,      // Brushless DC motor
 }
