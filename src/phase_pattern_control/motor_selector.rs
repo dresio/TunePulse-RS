@@ -1,3 +1,5 @@
+use super::math::inverse_clarke_transform;
+
 #[derive(Debug, Clone, Copy)]
 // Structure to represent two components of voltage
 pub struct VectorAxes2I16 {
@@ -47,26 +49,11 @@ impl MotorSelector {
     }
 
     fn math_svpwm(voltg_sin: i16, voltg_cos: i16, voltg_available: i16) -> (i16, i16, i16) {
-        let voltg_sin = voltg_sin as i32;
-        let voltg_cos: i32 = voltg_cos as i32;
         let voltg_available: i32 = voltg_available as i32;
 
-        // ############# INVERSE CLARKE TRANSFORM ###################
-        // Precalculated sqrt(3)/2 scaled to i16 (sqrt(3)/2 * 2^16)
-        const SQRT3: f64 = 1.7320508075688772;
-        const SQRT3DIV2: i32 = (SQRT3 / 2.0f64 * (1u32 << 16) as f64) as i32;
-
-        // Convert beta voltage component to a scaled value using SQRT3DIV2
-        let voltg_beta_sqrt3_div2: i32 = (SQRT3DIV2 * voltg_cos) >> 16;
-
-        // Set phase A voltage to the alpha component
-        let mut voltg_a: i32 = voltg_sin;
-
-        // Calculate phase B voltage: -1/2 * V_alpha + sqrt(3)/2 * V_beta
-        let mut voltg_b: i32 = -(voltg_sin >> 1) + voltg_beta_sqrt3_div2;
-
-        // Calculate phase C voltage: -1/2 * V_alpha - sqrt(3)/2 * V_beta
-        let mut voltg_c: i32 = -(voltg_sin >> 1) - voltg_beta_sqrt3_div2;
+        // Inverse Clarke transform
+        let (mut voltg_a, mut voltg_b, mut voltg_c) =
+            inverse_clarke_transform(voltg_sin, voltg_cos);
 
         // Find the minimum and maximum phase voltages
         let voltg_min: i32 = voltg_a.min(voltg_b).min(voltg_c);
