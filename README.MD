@@ -64,3 +64,5 @@ cargo flash --release --chip STM32G431CBTx
 - [ ] DMA with ADC
 - [ ] SPI for encoder (Half Duplex Master Mode, no miso, only mosi (may be good to make this configurable))
 - [ ] Extra: Bring in probe.rs for debugging
+
+cargo flash --release --package pwm_test --chip STM32G431CBTx
