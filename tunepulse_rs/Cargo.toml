@@ -1,0 +1,26 @@
+[package]
+name = "tunepulse_rs"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "Universl motor controller firmware"
+homepage = "https://creapunk.com"
+
+[package.metadata]
+authors = ["Anton Khrustalev"]
+
+[lib]
+path = "src/lib.rs"
+crate-type = ["rlib"]  # Makes the library reusable for no_std and std
+
+[dependencies]
+# Define dependencies here, e.g., math or embedded utilities
+
+[features]
+# Allow the library to work in both std and no_std environments
+default = ["std"]
+std = []                # Enable std support when used with std
+
+
+
+
