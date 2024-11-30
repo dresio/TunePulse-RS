@@ -1,9 +1,12 @@
-pub mod motor_selector;
+mod motor_selector;
 
-pub mod phase_selector;
+mod phase_selector;
 
-use crate::math_integer::clarke_transform as math;
+use motor_selector::MotorSelector;
+use phase_selector::PhaseSelector;
 
+use crate::math_integer::clarke_transform::inverse_clarke_transform;
+use crate::math_integer::trigonometry as math;
 
 /// Enum for PhasePattern representing different PWM patterns
 #[derive(Debug, Clone, Copy)]
@@ -14,7 +17,6 @@ pub enum PhasePattern {
     DCAB = 0b01001011, // Pattern 3: {3, 2, 0, 1}
 }
 
-
 #[derive(Debug, Clone, Copy)]
 // Enumeration for motor types
 pub enum MotorType {
@@ -22,4 +24,44 @@ pub enum MotorType {
     DC,        // Direct Current motor
     STEPPER,   // Stepper motor
     BLDC,      // Brushless DC motor
+}
+
+// Class to handle different types of motor controls
+pub struct MotorPWM {
+    motor_sel: MotorSelector,
+    phase_sel: PhaseSelector,
+}
+
+impl MotorPWM {
+    // Constructor for MotorPWM
+    pub fn new(motor: MotorType, connection: PhasePattern) -> Self {
+        MotorPWM {
+            motor_sel: MotorSelector::new(motor),
+            phase_sel: PhaseSelector::new(connection as u8),
+        }
+    }
+
+    // Function to update motor control based on mode
+    pub fn tick(&mut self, voltg_ab: (i16, i16)) -> [i16; 4] {
+        // Update the motor selector state
+        let motor_pwm = self.motor_sel.tick(voltg_ab, 25000);
+        // Update the phase selector state
+        self.phase_sel.tick(motor_pwm)
+    }
+
+    pub fn tick_angle(&mut self, voltg_ang: (i16, i16)) -> [i16; 4]  {
+        let voltage_ab = math::angle2sincos(voltg_ang.0);
+        let voltage_ab_scaled = math::scale_sincos(voltage_ab, voltg_ang.1);
+        self.tick(voltage_ab_scaled)
+    }
+
+    #[inline(always)]
+    pub fn change_motor_mode(&mut self, motor: MotorType) {
+        self.motor_sel.change_mode(motor);
+    }
+
+    #[inline(always)]
+    pub fn change_phase_mode(&mut self, connection: PhasePattern) {
+        self.phase_sel.change_mode(connection as u8);
+    }
 }

@@ -1,12 +1,12 @@
-use super::math::inverse_clarke_transform;
+use super::inverse_clarke_transform;
 use super::MotorType;
 
 // Class to handle different types of motor controls
 pub struct MotorSelector {
-    pub voltg: (i16, i16), // Input for alpha component of voltage
-    pub voltg_sup: i16,        // Input for supply voltage
-    pub mode: MotorType,       // Input for motor type mode
-    ch_abcd: [i16; 4],         // Array to store voltages for four channels
+    voltg_ab: (i16, i16), // Input for alpha component of voltage
+    voltg_sup: i16,    // Input for supply voltage
+    mode: MotorType,   // Input for motor type mode
+    ch_abcd: [i16; 4],     // Array to store voltages for four channels
 }
 
 impl MotorSelector {
@@ -15,7 +15,7 @@ impl MotorSelector {
     pub fn new(mode: MotorType) -> Self {
         MotorSelector {
             mode,
-            voltg: (0,0),
+            voltg_ab: (0, 0),
             voltg_sup: 0,
             ch_abcd: [0; 4],
         }
@@ -23,8 +23,8 @@ impl MotorSelector {
 
     // Function to calculate coil voltages
     fn math_coil(voltg_ref: i16) -> (i16, i16) {
-        if voltg_ref == Self::DISBL {
-            return (Self::DISBL, Self::DISBL);
+        if voltg_ref == Self::DISBL || voltg_ref == 0 {
+            return (voltg_ref, voltg_ref);
         }
 
         // CENTER ALLIGNED PWM IS REQUIRED
@@ -88,7 +88,7 @@ impl MotorSelector {
     /// Function to handle one-phase motor control
     #[inline(always)]
     fn tick1phase(&mut self) {
-        (self.ch_abcd[0], self.ch_abcd[1]) = Self::math_coil(self.voltg.0);
+        (self.ch_abcd[0], self.ch_abcd[1]) = Self::math_coil(self.voltg_ab.0);
         // Set unused phase to brake voltage (optional)
         self.ch_abcd[2] = Self::DISBL;
         self.ch_abcd[3] = Self::DISBL;
@@ -97,31 +97,34 @@ impl MotorSelector {
     /// Function to handle two-phase motor control
     #[inline(always)]
     fn tick2phase(&mut self) {
-        (self.ch_abcd[0], self.ch_abcd[1]) = Self::math_coil(self.voltg.0);
-        (self.ch_abcd[2], self.ch_abcd[3]) = Self::math_coil(self.voltg.1);
+        (self.ch_abcd[0], self.ch_abcd[1]) = Self::math_coil(self.voltg_ab.0);
+        (self.ch_abcd[2], self.ch_abcd[3]) = Self::math_coil(self.voltg_ab.1);
     }
 
     /// Function to control 3Phase 3Wire motor with SVPWM algorithm
     #[inline(always)]
     fn tick3phase(&mut self) {
         (self.ch_abcd[0], self.ch_abcd[1], self.ch_abcd[2]) =
-            Self::math_svpwm(self.voltg.0, self.voltg.1, self.voltg_sup);
+            Self::math_svpwm(self.voltg_ab.0, self.voltg_ab.1, self.voltg_sup);
         // Set unused phase to brake voltage (optional)
         self.ch_abcd[3] = Self::DISBL;
     }
 
     // Function to update motor control based on mode
-    pub fn tick(&mut self) {
+    pub fn tick(&mut self, voltg_ab: (i16, i16), voltg_sup: i16) -> [i16; 4] {
+        self.voltg_ab = voltg_ab;
+        self.voltg_sup = voltg_sup;
         match self.mode {
             MotorType::UNDEFINED => self.tick0phase(),
             MotorType::DC => self.tick1phase(),
             MotorType::STEPPER => self.tick2phase(),
             MotorType::BLDC => self.tick3phase(),
         }
+        self.ch_abcd
     }
 
-    // Function to get PWM channel values
-    pub fn pwm_channels(&self) -> [i16; 4] {
-        self.ch_abcd
+    #[inline(always)]
+    pub fn change_mode(&mut self, mode: MotorType) {
+        self.mode = mode;
     }
 }

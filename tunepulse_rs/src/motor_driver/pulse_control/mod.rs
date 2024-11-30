@@ -1,7 +1,7 @@
 /// A struct representing a converter from angle to motor pulses.
 /// This struct is used to determine the number of pulses needed to rotate a stepper motor
 /// by a specified angle. It keeps track of motor direction, microstepping, and error correction.
-pub struct AngleToPulse {
+pub struct MotorPulse {
     /// Number of steps needed by the motor driver to reach the target angle.
     pub steps: u16,
     /// Motor rotation direction (true for one direction, false for the other).
@@ -16,7 +16,7 @@ pub struct AngleToPulse {
     error: i32,
 }
 
-impl AngleToPulse {
+impl MotorPulse {
     /// Constructs a new `AngleToPulse` instance.
     ///
     /// # Arguments
@@ -26,7 +26,7 @@ impl AngleToPulse {
     /// # Returns
     /// A new `AngleToPulse` instance initialized with default values.
     pub fn new(usteps_pow: u16) -> Self {
-        AngleToPulse {
+        MotorPulse {
             ustep: Self::ustep_calc(usteps_pow),
             steps: 0,
             direction: false,

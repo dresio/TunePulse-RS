@@ -39,9 +39,9 @@ const SINE_QUARTER_WAVE: [i16; 257] = [
 /// * The function uses a quarter-wave lookup table for computational efficiency.
 /// * The lookup is performed in 4 quadrants, reducing the memory footprint while allowing
 ///   for full 360-degree coverage.
-pub const fn angle2sincos(angle: i32) -> (i16, i16) {
+pub const fn angle2sincos(angle: i16) -> (i16, i16) {
     // Get the top 10 bits (1024 points resolution per full wave)
-    let angle_uint = (angle as u32) >> 22;
+    let angle_uint = (angle as u16) >> 6;
 
     // Map the normalized angle to the index of the quarter wave array (0 to 255)
     let index = angle_uint & 0xFF;
