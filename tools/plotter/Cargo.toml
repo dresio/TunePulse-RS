@@ -1,0 +1,9 @@
+[package]
+name = "plotter"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+egui = "0.29.1"
+egui-plotter = "0.3"
+rtt-target = "0.6.0"  

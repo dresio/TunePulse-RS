@@ -43,7 +43,17 @@ https://marketplace.visualstudio.com/items?itemName=probe-rs.probe-rs-debugger
 
 Plug in The computer to ST-LINK Port on the programmer, and the controller to the single port on the programmer.
 
-cargo flash --release --chip STM32G431CBTx
+ex:
+
+```
+cargo run --package tunepulse_rs --release
+```
+
+or
+
+```
+cargo run --package pwm
+```
 
 ## Progress
 
@@ -65,4 +75,7 @@ cargo flash --release --chip STM32G431CBTx
 - [ ] SPI for encoder (Half Duplex Master Mode, no miso, only mosi (may be good to make this configurable))
 - [ ] Extra: Bring in probe.rs for debugging
 
-cargo flash --release --package pwm_test --chip STM32G431CBTx
+needed downgraded version of probe-rs:  
+rustup default 1.79.0 (can upgrade again once probe-rs is installed)
+cargo update
+cargo install probe-rs --locked --features cli --version 0.21.1 --force

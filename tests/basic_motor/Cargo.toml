@@ -1,5 +1,5 @@
 [package]
-name = "pwm"
+name = "basic_motor"
 version = "0.1.0"
 edition = "2021"
 

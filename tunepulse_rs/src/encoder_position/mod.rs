@@ -2,6 +2,8 @@ use crate::math_integer::filters::lpf::FilterLPF;
 
 pub mod speed_estimator;
 use self::speed_estimator::SpeedEstimator;
+// Import necessary modules from the hardware abstraction layer (hal)
+use hal::{self, gpio::Pin, pac::SPI1, spi::Spi};
 
 /// EncoderPosition manages and calculates the absolute position and speed of the encoder.
 pub struct EncoderPosition {
@@ -9,7 +11,7 @@ pub struct EncoderPosition {
     rotations: i16,                  // Full rotations count
     angle: u16,                      // Shaft angle
     pub alpha: u8,                   // Filtering coefficient (0 <..> 255)
-    filter: FilterLPF,             // Position filter instance
+    filter: FilterLPF,               // Position filter instance
     speed_estimator: SpeedEstimator, // Speed estimator instance
     prev_sector: i16,                // Previous angle for zero-cross detection
 }
@@ -85,5 +87,26 @@ impl EncoderPosition {
     /// Getter for speed, returns i32 (i16 RPM + u16 fractional part)
     pub fn speed(&self) -> i32 {
         self.speed_estimator.get_speed()
+    }
+
+    // Function to read the encoder value over SPI
+    pub fn read_encoder(spi: &mut Spi<SPI1>, cs_pin: &mut Pin) -> u16 {
+        // Pull CS low to start SPI communication
+        cs_pin.set_low();
+
+        // Prepare the buffer with the command word 0x8020 and placeholders for response
+        let mut buf = [0x80, 0x20, 0x00, 0x00];
+        // Transfer the data over SPI and read the response
+        spi.transfer(&mut buf).unwrap();
+
+        // Pull CS high to end SPI communication
+        cs_pin.set_high();
+
+        // Process the received data to extract the encoder value
+        let respond = ((buf[2] as u16) << 8) | buf[3] as u16;
+        let respond = respond << 1; // Shift left to align the data
+
+        // Return the encoder value
+        respond
     }
 }
