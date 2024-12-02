@@ -20,13 +20,14 @@ use hal::{
 };
 
 // Import custom modules from tunepulse_rs crate
-use tunepulse_rs::{
+use tunepulse_algo::{
     encoder_position::EncoderPosition, // Encoder position handling
     motor_driver::{
-        pwm_control::{MotorType, PhasePattern},
-        MotorDriver,
+        pwm_control::{MotorType, PhasePattern}, MotorDriver      
     }, // Motor control modules
 };
+
+use tunepulse_drivers::*;
 
 // Additional import for Cortex-M specific functionalities
 use cortex_m;

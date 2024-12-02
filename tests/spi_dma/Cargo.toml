@@ -1,21 +1,13 @@
 [package]
-name = "pwm"
+name = "spi_dma"
 version = "0.1.0"
 edition = "2021"
-license = "Apache-2.0"
-description = "Universl motor controller firmware"
-homepage = "https://creapunk.com"
-
-[package.metadata]
-authors = ["Anton Khrustalev"]
 
 [dependencies]
-tunepulse_rs = { path = "../tunepulse_rs", default-features = false }
-
 defmt = "0.3.4"
 defmt-rtt = "0.4.0"
 panic-probe = { version = "0.3.1", features = ["print-defmt"] }
 
 cortex-m = { version = "0.7", features = ["critical-section-single-core"] }
-hal = { package = "stm32-hal2", version = "^1.8.3", features = ["g431", "g4rt"]}
+hal = { package = "stm32-hal2", version = "^1.8.0", features = ["g431", "g4rt"]}
 rtic = { version = "2.1.1", features = ["cortex-m", "thumbv7-backend", "rtic-monotonics"] }

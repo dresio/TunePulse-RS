@@ -1,8 +1,11 @@
 [workspace]
 resolver = "2"
 members = [
-    "tunepulse_rs",
-    "pwm",
+    "tunepulse_algo",
+    "tunepulse_drivers",
+    "app",
+    "tests/blink",
+    "tests/spi_dma",
 ]
 
 # cargo build/run

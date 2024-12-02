@@ -1,5 +1,5 @@
 [package]
-name = "tunepulse_rs"
+name = "tunepulse_algo"
 version = "0.1.0"
 edition = "2021"
 license = "Apache-2.0"
@@ -14,6 +14,8 @@ path = "src/lib.rs"
 crate-type = ["rlib"]  # Makes the library reusable for no_std and std
 
 [dependencies]
+hal = { package = "stm32-hal2", version = "^1.8.0", features = ["g431", "g4rt"]}
+
 # Define dependencies here, e.g., math or embedded utilities
 
 [features]

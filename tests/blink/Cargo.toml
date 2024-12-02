@@ -1,0 +1,15 @@
+[package]
+name = "blink"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+defmt = "0.3.0"
+defmt-rtt = "0.4.0"
+panic-probe = { version = "0.3.0", features = ["print-defmt"] }
+
+cortex-m = { version = "^0.7.7", features = ["critical-section-single-core"] }
+cortex-m-rt = "0.7.3"
+hal = { package = "stm32-hal2", version = "^1.8.0", features = ["g431", "g4rt"]}
+
+tunepulse_drivers = {path="../../tunepulse_drivers"}
