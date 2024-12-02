@@ -23,7 +23,8 @@ use hal::{
 use tunepulse_algo::{
     encoder_position::EncoderPosition, // Encoder position handling
     motor_driver::{
-        pwm_control::{MotorType, PhasePattern}, MotorDriver      
+        pwm_control::{MotorType, PhasePattern},
+        MotorDriver,
     }, // Motor control modules
 };
 
@@ -44,7 +45,7 @@ mod app {
     // Local resources for tasks
     #[local]
     struct Local {
-        timer_pwd: Timer<TIM2>,       // Timer for PWM
+        timer_pwm: pwm::TimPWM,       // Timer for PWM
         underflow: bool,              // Underflow flag
         tick_counter: i16,            // Counter for ticks
         motor: MotorDriver,           // Motor selector for PWM control
@@ -57,7 +58,7 @@ mod app {
     #[init]
     fn init(ctx: init::Context) -> (Shared, Local) {
         // Define the frequency for the timer
-        let FREQUENCY = 18000;
+        let freq = 18000;
         // Get the device peripherals
         let dp = ctx.device;
 
@@ -74,23 +75,24 @@ mod app {
         init_button_it();
 
         // Initialize the PWM timer with the given frequency
-        let mut timer_pwd = init_timer(dp.TIM2, &clock_cfg, FREQUENCY);
+        let mut timer_pwm = pwm::TimPWM::new(dp.TIM2, &clock_cfg, freq);
+        timer_pwm.run();
 
         // Initialize SPI pins and SPI peripheral
         let cs_pin = init_spi_pins();
         let spi = init_spi(dp.SPI1);
 
         // Initialize motor and phase selectors
-        let mut motor = MotorDriver::new(MotorType::STEPPER, PhasePattern::ABCD, FREQUENCY);
+        let mut motor = MotorDriver::new(MotorType::STEPPER, PhasePattern::ABCD, freq);
 
         // Initialize encoder position tracking
-        let mut encoder_pos = EncoderPosition::new(0, FREQUENCY, 240);
+        let mut encoder_pos = EncoderPosition::new(0, freq, 240);
 
         // Return the shared and local resources
         (
             Shared {},
             Local {
-                timer_pwd,
+                timer_pwm,
                 underflow: true,
                 tick_counter: 0,
                 motor,
@@ -107,20 +109,20 @@ mod app {
     // Function to initialize driver control pins and configure PWM output pins
     fn init_driver_pins() {
         // Create a new output pin for driver reset on Port B, Pin 2
-        let mut dr_reset = Pin::new(Port::B, 2, PinMode::Output);
+        let mut dr_reset = pinout::driver::RESET.init();
         // Set the driver reset pin high (inactive)
         dr_reset.set_high();
 
         // Create a new output pin for driver enable on Port A, Pin 4
-        let mut dr_en = Pin::new(Port::A, 4, PinMode::Output);
+        let mut dr_en = pinout::driver::ENABLE.init();
         // Set the driver enable pin high (enabled)
         dr_en.set_high();
 
         // Configure PWM output pins for alternate function (Timer channels)
-        Pin::new(Port::A, 1, PinMode::Alt(1)); // TIM2_CH2
-        Pin::new(Port::A, 0, PinMode::Alt(1)); // TIM2_CH1
-        Pin::new(Port::B, 11, PinMode::Alt(1)); // TIM2_CH4
-        Pin::new(Port::B, 10, PinMode::Alt(1)); // TIM2_CH3
+        pinout::driver::PWM_A1.init();
+        pinout::driver::PWM_A2.init();
+        pinout::driver::PWM_B1.init();
+        pinout::driver::PWM_B2.init();
     }
 
     // Function to initialize the button interrupt
@@ -137,12 +139,12 @@ mod app {
     fn init_spi_pins() -> Pin {
         // Configure SPI1 pins for alternate function mode
         // PA5 (SCK), PA6 (MISO), PA7 (MOSI)
-        Pin::new(Port::A, 5, PinMode::Alt(5)); // SPI1_SCK
-        Pin::new(Port::A, 6, PinMode::Alt(5)); // SPI1_MISO
-        Pin::new(Port::A, 7, PinMode::Alt(5)); // SPI1_MOSI
+        pinout::encoder::SPI1_SCK.init();
+        pinout::encoder::SPI1_MOSI.init();
+        pinout::encoder::SPI1_MISO.init();
 
         // Configure CS pin on Port C, Pin 4 as output
-        let mut cs_pin = Pin::new(Port::C, 4, PinMode::Output);
+        let mut cs_pin = pinout::encoder::SPI1_CS.init();
         // Set CS high (inactive)
         cs_pin.set_high(); // Set CS high (inactive)
 
@@ -161,61 +163,6 @@ mod app {
         // Initialize SPI1 with the configuration and set BaudRate
         // Adjust BaudRate as needed; Div32 for lower speed if APB clock is high
         Spi::new(spi1, spi_cfg, BaudRate::Div32)
-    }
-
-    // Function to initialize Timer TIM2 for PWM outputs
-    fn init_timer(tim2: TIM2, clock_cfg: &Clocks, freq: u16) -> Timer<TIM2> {
-        // Create a new Timer with the specified frequency and configuration
-        let mut timer_pwd = Timer::new_tim2(
-            tim2,
-            freq as f32,
-            TimerConfig {
-                one_pulse_mode: false,
-                update_request_source: UpdateReqSrc::Any,
-                auto_reload_preload: true,
-                alignment: Alignment::Center1,
-                capture_compare_dma: CaptureCompareDma::Update,
-                direction: CountDir::Up,
-            },
-            clock_cfg,
-        );
-
-        // Enable PWM outputs on channels 1 to 4 with initial duty cycle 0.0
-        timer_pwd.enable_pwm_output(TimChannel::C1, OutputCompare::Pwm1, 0.0);
-        timer_pwd.enable_pwm_output(TimChannel::C2, OutputCompare::Pwm1, 0.0);
-        timer_pwd.enable_pwm_output(TimChannel::C3, OutputCompare::Pwm1, 0.0);
-        timer_pwd.enable_pwm_output(TimChannel::C4, OutputCompare::Pwm1, 0.0);
-
-        // Enable update interrupt for the timer
-        timer_pwd.enable_interrupt(TimerInterrupt::Update);
-        // Start the timer
-        timer_pwd.enable();
-
-        // Return the initialized timer
-        timer_pwd
-    }
-
-    // Utility functions
-    // -----------------
-
-    // Function to set PWM duties on all four channels
-    fn set_pwm_duties(timer: &mut Timer<TIM2>, duties: &[i16; 4]) {
-        // Get the maximum duty cycle value from the timer
-        let max_duty = timer.get_max_duty();
-        // Set the duty cycle for each channel
-        set_pwm_duty(timer, TimChannel::C1, duties[0], max_duty);
-        set_pwm_duty(timer, TimChannel::C2, duties[1], max_duty);
-        set_pwm_duty(timer, TimChannel::C3, duties[2], max_duty);
-        set_pwm_duty(timer, TimChannel::C4, duties[3], max_duty);
-    }
-
-    // Function to set PWM duty cycle for a single channel
-    #[inline(always)]
-    fn set_pwm_duty(timer: &mut Timer<TIM2>, channel: TimChannel, value: i16, max_period: u32) {
-        // Calculate the duty cycle value based on the input value and maximum period
-        let duty: u32 = (value.abs() as u32 * max_period) >> 15;
-        // Set the duty cycle for the specified channel
-        timer.set_duty(channel, duty);
     }
 
     // Function to read the encoder value over SPI
@@ -240,74 +187,46 @@ mod app {
     }
 
     // Interrupt handler and callbacks
-    // -------------------------------
-
-    // Timer interrupt handler for TIM2
-    #[task(binds = TIM2, local = [timer_pwd, underflow, tick_counter, motor, encoder_pos, spi, cs_pin])]
+    #[task(binds = TIM2, local = [timer_pwm, underflow, tick_counter, motor, encoder_pos, spi, cs_pin])]
     fn tim2_period_elapsed(cx: tim2_period_elapsed::Context) {
         // Clear the update interrupt flag
-        cx.local.timer_pwd.clear_interrupt(TimerInterrupt::Update);
+        cx.local
+            .timer_pwm
+            .get_timer()
+            .clear_interrupt(TimerInterrupt::Update);
 
         // Increment the tick counter, wrapping around on overflow
         *cx.local.tick_counter = cx.local.tick_counter.wrapping_add(1);
 
         // Alternate between PWM and analog callbacks on underflow flag
         if *cx.local.underflow {
-            // Call the PWM callback function
-            pwm_callback(
-                cx.local.tick_counter,
-                cx.local.timer_pwd,
-                cx.local.motor,
-                cx.local.encoder_pos,
-                cx.local.spi,
-                cx.local.cs_pin,
+            // Call the PWM callback
+            let mut speed = 25;
+            let mut duty = 0.2;
+
+            // Get the current counter value
+            let counter = *cx.local.tick_counter;
+            // Define the speed multiplier
+
+            let mut pwm: i16 = (i16::MAX as f32 * duty) as i16;
+
+            // Read the encoder value via SPI
+            let encoder_value = read_encoder(cx.local.spi, cx.local.cs_pin);
+            // Update the encoder position with the new value
+            cx.local.encoder_pos.tick(encoder_value);
+            let pwm_values = cx.local.motor.tick(
+                (counter.wrapping_mul(speed), pwm),
+                cx.local.encoder_pos.position(),
             );
+            // Set the PWM duties on the timer
+            cx.local.timer_pwm.apply_pwm(pwm_values);
         } else {
             // Call the analog callback function (placeholder)
-            analog_callback();
+            // TODO: Implement ADC reading
         }
 
         // Toggle the underflow flag
         *cx.local.underflow = !*cx.local.underflow;
-    }
-
-    // Function to handle PWM updates
-    fn pwm_callback(
-        tick_counter: &i16,
-        timer_pwd: &mut Timer<TIM2>,
-        motor: &mut MotorDriver,
-        encoder_pos: &mut EncoderPosition,
-        spi: &mut Spi<SPI1>,
-        cs_pin: &mut Pin,
-    ) {
-        let mut speed = 25;
-        let mut duty = 0.2;
-
-        // Get the current counter value
-        let counter = *tick_counter;
-        // Define the speed multiplier
-
-        let mut pwm: i16 = (i16::MAX as f32 * duty) as i16;
-
-        // Read the encoder value via SPI
-        let encoder_value = read_encoder(spi, cs_pin);
-        // Update the encoder position with the new value
-        encoder_pos.tick(encoder_value);
-        let pwm_values = motor.tick((counter.wrapping_mul(speed), pwm), encoder_pos.position());
-        // Set the PWM duties on the timer
-        set_pwm_duties(timer_pwd, &pwm_values);
-    
-        // Uncomment the line below to print the position (requires defmt support)
-        
-        // if motor.is_ready() == true {
-        //     defmt::println!("Pole count: {}; Pos: {}; InitPos: {}", motor.pole_count, motor.position, motor.start_pos);
-        // }
-        
-    }
-
-    // Placeholder function for analog updates (e.g., ADC readings)
-    fn analog_callback() {
-        // TODO: Implement ADC reading
     }
 } // End of RTIC app module
 

@@ -4,7 +4,6 @@
 use defmt_rtt as _;
 use panic_probe as _;
 
-use cortex_m::prelude::_embedded_hal_blocking_delay_DelayMs;
 use hal::dma;
 use hal::dma::DmaInterrupt;
 use hal::dma::{Dma, DmaChannel, DmaInput, DmaPeriph};
@@ -14,11 +13,15 @@ use hal::spi::{BaudRate, Spi, SpiConfig, SpiMode};
 use hal::timer::{Timer, TimerInterrupt};
 use hal::{self, clocks::Clocks, pac, pac::TIM3};
 
+use tunepulse_algo::encoder_position::EncoderPosition;
+
 static mut SPI_READ_BUF: [u8; 4] = [0; 4];
 static mut SPI_WRITE_BUF: [u8; 4] = [0x80, 0x20, 0x00, 0x00];
 
 #[rtic::app(device = pac, peripherals = true)]
 mod app {
+    use tunepulse_drivers::pinout::encoder;
+
     use super::*;
 
     #[shared]
@@ -31,6 +34,8 @@ mod app {
         cs_pin: Pin,
 
         timer: Timer<TIM3>,
+
+        encoder: EncoderPosition,
     }
 
     fn init_pins() {
@@ -45,6 +50,7 @@ mod app {
 
     #[init]
     fn init(ctx: init::Context) -> (Shared, Local) {
+        let freq = 2; // Hz
         let _cp = ctx.core;
         let dp = ctx.device;
 
@@ -65,20 +71,25 @@ mod app {
         dma::mux(DmaPeriph::Dma1, DmaChannel::C1, DmaInput::Spi1Tx);
         dma::mux(DmaPeriph::Dma1, DmaChannel::C2, DmaInput::Spi1Rx);
 
-        let mut timer = Timer::new_tim3(dp.TIM3, 1., Default::default(), &clock_cfg);
+        let mut encoder = EncoderPosition::new(0, freq, 128);
+
+        let mut timer = Timer::new_tim3(dp.TIM3, freq as f32, Default::default(), &clock_cfg);
         timer.enable_interrupt(TimerInterrupt::Update);
         timer.enable();
+
+        
 
         (
             Shared { spi1 },
             Local {
                 cs_pin: Pin::new(Port::C, 4, PinMode::Output),
                 timer,
+                encoder,
             },
         )
     }
 
-    #[task(binds = DMA1_CH2, local=[cs_pin], shared = [spi1], priority = 1)]
+    #[task(binds = DMA1_CH2, local=[cs_pin, encoder], shared = [spi1], priority = 1)]
     fn on_encoder_rx(mut cx: on_encoder_rx::Context) {
         dma::clear_interrupt(
             DmaPeriph::Dma1,
@@ -99,7 +110,12 @@ mod app {
             let respond = ((buf[2] as u16) << 8) | buf[3] as u16;
             let res = respond << 1;
 
+            cx.local.encoder.tick(res);
+
+            let pos =  cx.local.encoder.position();
+
             defmt::println!("Data read: {:?}", res);
+            defmt::println!("Encoder position: {:?}", pos);
         }
 
         cx.local.cs_pin.set_high();

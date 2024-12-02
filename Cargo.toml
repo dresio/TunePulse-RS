@@ -4,8 +4,8 @@ members = [
     "tunepulse_algo",
     "tunepulse_drivers",
     "app",
-    "tests/blink",
-    "tests/spi_dma",
+    "test/blink",
+    "test/encoder_dma",
 ]
 
 # cargo build/run

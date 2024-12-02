@@ -50,6 +50,8 @@ impl EncoderPosition {
 
         // Calculate instant speed based on position change
         self.speed_estimator.tick(self.position);
+
+        
     }
 
     /// Detects zero-crossings and updates the rotation count accordingly.

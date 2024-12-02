@@ -1,5 +1,5 @@
 [package]
-name = "spi_dma"
+name = "encoder_dma"
 version = "0.1.0"
 edition = "2021"
 
@@ -9,5 +9,8 @@ defmt-rtt = "0.4.0"
 panic-probe = { version = "0.3.1", features = ["print-defmt"] }
 
 cortex-m = { version = "0.7", features = ["critical-section-single-core"] }
-hal = { package = "stm32-hal2", version = "^1.8.0", features = ["g431", "g4rt"]}
+hal = { package = "stm32-hal2", version = "=1.8.3", features = ["g431", "g4rt"]}
 rtic = { version = "2.1.1", features = ["cortex-m", "thumbv7-backend", "rtic-monotonics"] }
+
+tunepulse_drivers = {path="../../tunepulse_drivers"}
+tunepulse_algo = {path="../../tunepulse_algo"}

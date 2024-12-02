@@ -15,4 +15,4 @@ cortex-m-rt = "0.7.3"
 hal = { package = "stm32-hal2", version = "^1.8.0", features = ["g431", "g4rt"]}
 embedded-time = "0.12.1"
 
-tunepulse_rs = {path="../../tunepulse_rs"}
+tunepulse_drivers = {path="../../tunepulse_drivers"}
