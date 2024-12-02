@@ -6,12 +6,14 @@ use hal::{
         TimerInterrupt, UpdateReqSrc,
     },
 };
+
+use super::pinout;
 pub struct TimPWM {
     tim: Timer<TIM2>,
 }
 
 impl TimPWM {
-    pub fn new(tim2: TIM2,clock_cfg: &Clocks, freq: u16) -> Self {
+    pub fn new(tim2: TIM2, clock_cfg: &Clocks, freq: u16) -> Self {
         // Create a new Timer with the specified frequency and configuration
         let mut timer = Timer::new_tim2(
             tim2,
@@ -39,7 +41,7 @@ impl TimPWM {
         &mut self.tim
     }
 
-    pub fn run(&mut self) {
+    pub fn begin(&mut self) {
         // Enable PWM outputs on channels 1 to 4 with initial duty cycle 0.0
         self.tim
             .enable_pwm_output(TimChannel::C1, OutputCompare::Pwm1, 0.0);
@@ -49,14 +51,23 @@ impl TimPWM {
             .enable_pwm_output(TimChannel::C3, OutputCompare::Pwm1, 0.0);
         self.tim
             .enable_pwm_output(TimChannel::C4, OutputCompare::Pwm1, 0.0);
+
+        pinout::driver::PWM_A1.init();
+        pinout::driver::PWM_A2.init();
+        pinout::driver::PWM_B1.init();
+        pinout::driver::PWM_B2.init();
     }
 
     pub fn apply_pwm(&mut self, pwm: [i16; 4]) {
         let period = self.tim.get_max_duty();
-        self.tim.set_duty(TimChannel::C1, Self::duty2period(pwm[0], period));
-        self.tim.set_duty(TimChannel::C2, Self::duty2period(pwm[1], period));
-        self.tim.set_duty(TimChannel::C3, Self::duty2period(pwm[2], period));
-        self.tim.set_duty(TimChannel::C4, Self::duty2period(pwm[3], period));
+        self.tim
+            .set_duty(TimChannel::C1, Self::duty2period(pwm[0], period));
+        self.tim
+            .set_duty(TimChannel::C2, Self::duty2period(pwm[1], period));
+        self.tim
+            .set_duty(TimChannel::C3, Self::duty2period(pwm[2], period));
+        self.tim
+            .set_duty(TimChannel::C4, Self::duty2period(pwm[3], period));
     }
 
     fn duty2period(duty: i16, period: u32) -> u32 {

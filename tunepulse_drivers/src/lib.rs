@@ -2,4 +2,4 @@
 
 pub mod pinout;
 pub mod pwm;
-pub mod spi;
+pub mod encoder_spi;

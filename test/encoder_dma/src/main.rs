@@ -7,64 +7,41 @@ use panic_probe as _;
 use hal::dma;
 use hal::dma::DmaInterrupt;
 use hal::dma::{Dma, DmaChannel, DmaInput, DmaPeriph};
-use hal::gpio::{Pin, PinMode, Port};
-use hal::pac::SPI1;
-use hal::spi::{BaudRate, Spi, SpiConfig, SpiMode};
 use hal::timer::{Timer, TimerInterrupt};
 use hal::{self, clocks::Clocks, pac, pac::TIM3};
 
 use tunepulse_algo::encoder_position::EncoderPosition;
+use tunepulse_drivers::encoder_spi;
 
-static mut SPI_READ_BUF: [u8; 4] = [0; 4];
+static mut SPI_READ_BUF: [u8; 4] = [0x00, 0x00, 0x00, 0x00];
 static mut SPI_WRITE_BUF: [u8; 4] = [0x80, 0x20, 0x00, 0x00];
 
 #[rtic::app(device = pac, peripherals = true)]
 mod app {
-    use tunepulse_drivers::pinout::encoder;
-
     use super::*;
 
     #[shared]
     struct Shared {
-        spi1: Spi<SPI1>,
+        spi1: encoder_spi::Spi1DMA,
     }
 
     #[local]
     struct Local {
-        cs_pin: Pin,
-
         timer: Timer<TIM3>,
 
         encoder: EncoderPosition,
     }
 
-    fn init_pins() {
-        Pin::new(Port::A, 5, PinMode::Alt(5)); // PA5 SPI1_SCK
-        Pin::new(Port::A, 6, PinMode::Alt(5)); // PA6 SPI1_MISO
-        Pin::new(Port::A, 7, PinMode::Alt(5)); // PA7 SPI1_MOSI
-
-        // Configure CS pin on Port C, Pin 4 as output
-        let mut cs_pin = Pin::new(Port::C, 4, PinMode::Output);
-        cs_pin.set_high();
-    }
-
     #[init]
     fn init(ctx: init::Context) -> (Shared, Local) {
-        let freq = 2; // Hz
+        let freq = 1; // Hz
         let _cp = ctx.core;
         let dp = ctx.device;
 
         let clock_cfg = Clocks::default();
         clock_cfg.setup().unwrap();
 
-        init_pins();
-
-        let spi_cfg = SpiConfig {
-            mode: SpiMode::mode1(),
-            ..Default::default()
-        };
-
-        let mut spi1 = Spi::new(dp.SPI1, spi_cfg, BaudRate::Div32);
+        let mut spi1 = encoder_spi::Spi1DMA::new(dp.SPI1);
 
         let _dma = Dma::new(dp.DMA1);
         dma::enable_mux1();
@@ -77,64 +54,22 @@ mod app {
         timer.enable_interrupt(TimerInterrupt::Update);
         timer.enable();
 
-        
-
-        (
-            Shared { spi1 },
-            Local {
-                cs_pin: Pin::new(Port::C, 4, PinMode::Output),
-                timer,
-                encoder,
-            },
-        )
-    }
-
-    #[task(binds = DMA1_CH2, local=[cs_pin, encoder], shared = [spi1], priority = 1)]
-    fn on_encoder_rx(mut cx: on_encoder_rx::Context) {
-        dma::clear_interrupt(
-            DmaPeriph::Dma1,
-            DmaChannel::C2,
-            DmaInterrupt::TransferComplete,
-        );
-
-        defmt::println!("SPI DMA read complete");
-
-        cx.shared.spi1.lock(|spi1| {
-            spi1.stop_dma(DmaChannel::C1, Some(DmaChannel::C2), DmaPeriph::Dma1);
-            spi1.cleanup_dma(DmaPeriph::Dma1, DmaChannel::C1, Some(DmaChannel::C2));
-        });
-
-        unsafe {
-            let buf = unsafe { &mut SPI_READ_BUF };
-
-            let respond = ((buf[2] as u16) << 8) | buf[3] as u16;
-            let res = respond << 1;
-
-            cx.local.encoder.tick(res);
-
-            let pos =  cx.local.encoder.position();
-
-            defmt::println!("Data read: {:?}", res);
-            defmt::println!("Encoder position: {:?}", pos);
-        }
-
-        cx.local.cs_pin.set_high();
+        (Shared { spi1 }, Local { timer, encoder })
     }
 
     #[task(binds = TIM3, local=[timer], shared = [spi1], priority = 2)]
-    fn on_timer(mut cx: on_timer::Context) {
+    fn on_timer( cx: on_timer::Context) {
         cx.local.timer.clear_interrupt(TimerInterrupt::Update);
-        req_spi_transfer::spawn().expect("can not spawn on_spi_transfer");
+        encoder_begin_read::spawn().expect("can not spawn on_spi_transfer");
     }
 
     #[task(priority = 0, shared = [spi1])]
-    async fn req_spi_transfer(mut cx: req_spi_transfer::Context) {
+    async fn encoder_begin_read(mut cx: encoder_begin_read::Context) {
         defmt::println!("transfer_dma");
 
-        Pin::new(Port::C, 4, PinMode::Output).set_low();
-
         cx.shared.spi1.lock(|spi1| unsafe {
-            spi1.transfer_dma(
+            spi1.start();
+            spi1.get_spi().transfer_dma(
                 &SPI_WRITE_BUF,
                 &mut SPI_READ_BUF,
                 DmaChannel::C1,
@@ -144,6 +79,33 @@ mod app {
                 DmaPeriph::Dma1,
             );
         });
+    }
+
+    #[task(binds = DMA1_CH2, local=[encoder], shared = [spi1], priority = 1)]
+    fn encoder_end_read(mut cx: encoder_end_read::Context) {
+        dma::clear_interrupt(
+            DmaPeriph::Dma1,
+            DmaChannel::C2,
+            DmaInterrupt::TransferComplete,
+        );
+
+        defmt::println!("SPI DMA read complete");
+
+        let mut res: u16 = 0;
+        cx.shared.spi1.lock(|spi1| {
+            spi1.get_spi()
+                .stop_dma(DmaChannel::C1, Some(DmaChannel::C2), DmaPeriph::Dma1);
+            spi1.get_spi()
+                .cleanup_dma(DmaPeriph::Dma1, DmaChannel::C1, Some(DmaChannel::C2));
+            res = spi1.end(unsafe { SPI_READ_BUF });
+        });
+
+        cx.local.encoder.tick(res);
+
+        let pos = cx.local.encoder.position();
+
+        defmt::println!("Data read: {:?}", res);
+        defmt::println!("Encoder position: {:?}", pos);
     }
 }
 
