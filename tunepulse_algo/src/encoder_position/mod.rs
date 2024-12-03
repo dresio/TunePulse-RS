@@ -43,7 +43,7 @@ impl EncoderPosition {
         self.angle = self.filter.get_output();
 
         // Adjust rotations based on zero-cross detection
-        self.rotations += self.angle_zcd(self.filter.get_output());
+        self.rotations = self.rotations.wrapping_add(self.angle_zcd(self.filter.get_output()));
 
         // Calculate position combined value
         self.position = self.angle as i32 + ((self.rotations as u32) << 16) as i32;

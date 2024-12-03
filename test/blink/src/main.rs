@@ -10,7 +10,6 @@ use hal::{
     self,
     clocks::Clocks,
     gpio::{Edge, Pin, PinMode, Port, Pull},
-    pac,
 };
 
 use defmt_rtt as _; // global logger
@@ -23,7 +22,6 @@ fn main() -> ! {
     // Set up CPU peripherals
     let cp = cortex_m::Peripherals::take().unwrap();
     // Set up microcontroller peripherals
-    let dp = pac::Peripherals::take().unwrap();
 
     let clock_cfg = Clocks::default();
 

@@ -6,6 +6,7 @@ members = [
     "app",
     "test/blink",
     "test/encoder_dma",
+    "test/adc_dma",
 ]
 
 # cargo build/run

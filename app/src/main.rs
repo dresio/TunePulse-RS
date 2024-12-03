@@ -1,129 +1,136 @@
 #![no_main]
 #![no_std]
 
-// Rust attributes indicating that this is a no_std (no standard library) application without a main function.
-
-// Use the defmt_rtt crate for logging (Real-Time Transfer)
 use defmt_rtt as _;
-// Use panic_probe crate to handle panics
 use panic_probe as _;
 
-// Import necessary modules from the hardware abstraction layer (hal)
 use hal::{
     self,
-    clocks::Clocks,                           // For configuring the system clocks
-    pac,               // Peripheral Access Crate (PAC) for device-specific peripherals
-    timer::*,          // Timer peripherals
+    adc::{Adc, AdcDevice, AdcInterrupt, Align, InputType, SampleTime},
+    clocks::Clocks,
+    dma,
+    dma::{Dma, DmaChannel, DmaInput, DmaInterrupt, DmaPeriph},
+    pac,
+    pac::{ADC1, DMA1},
+    timer::TimerInterrupt,
 };
 
-use hal::dma;
-use hal::dma::DmaInterrupt;
-use hal::dma::{Dma, DmaChannel, DmaInput, DmaPeriph};
-
-// Import custom modules from tunepulse_rs crate
-use tunepulse_algo::{
-    encoder_position::EncoderPosition, // Encoder position handling
-    motor_driver::{
-        pwm_control::{MotorType, PhasePattern},
-        MotorDriver,
-    }, // Motor control modules
-};
-
-use tunepulse_drivers::*;
-
-// Additional import for Cortex-M specific functionalities
 use cortex_m;
 
 static mut SPI_READ_BUF: [u8; 4] = [0x00, 0x00, 0x00, 0x00];
-static mut SPI_WRITE_BUF: [u8; 4] = [0x80, 0x20, 0x00, 0x00];
+const SPI_WRITE_BUF: [u8; 4] = [0x80, 0x20, 0x00, 0x00];
+
+const I_CH1: u8 = 4;
+const I_CH2: u8 = 15;
+const VSENS: u8 = 3;
+
+const SAMPLING_COUNT: usize = 3;
+const ADC1_SEQUENCE: [u8; SAMPLING_COUNT] = [I_CH1, I_CH2, VSENS];
+
+static mut ADC_READ_BUF: [u16; SAMPLING_COUNT] = [0; SAMPLING_COUNT];
 
 #[rtic::app(device = pac, peripherals = true)]
 mod app {
-    // Bring all previous imports into scope
     use super::*;
 
-    // Shared resources between tasks (empty in this case)
+    // Import custom modules from tunepulse_rs crate
+    use tunepulse_algo::{
+        analog::supply_voltage::SupplyVoltage,
+        encoder_position::EncoderPosition, // Encoder position handling
+        motor_driver::{
+            pwm_control::{MotorType, PhasePattern},
+            MotorDriver,
+        }, // Motor control modules
+    };
+
+    use tunepulse_drivers::*;
+
     #[shared]
     struct Shared {
         spi1: encoder_spi::Spi1DMA,
+        adc1: Adc<ADC1>,
     }
 
-    // Local resources for tasks
     #[local]
     struct Local {
-        timer_pwm: pwm::TimPWM,       // Timer for PWM
-        underflow: bool,              // Underflow flag
-        tick_counter: i16,            // Counter for ticks
-        motor: MotorDriver,           // Motor selector for PWM control
-        encoder_pos: EncoderPosition, // Encoder position tracking
+        timer_pwm: pwm::TimPWM,
+        underflow: bool,
+        tick_counter: i16,
+        motor: MotorDriver,
+        encoder_pos: EncoderPosition,
+        dma1: Dma<DMA1>,
+        supply: SupplyVoltage,
     }
 
-    // Initialization function
     #[init]
     fn init(ctx: init::Context) -> (Shared, Local) {
-        // Define the frequency for the timer
-        let freq = 18000;
-        // Get the device peripherals
         let dp = ctx.device;
-
-        // Initialize the system clocks with default configuration
         let clock_cfg = Clocks::default();
         clock_cfg.setup().unwrap();
 
-        // Get the system clock frequency
+        let freq = 18000;
         let sysclk_freq = clock_cfg.sysclk(); // System clock frequency in Hz
         defmt::println!("System clock frequency: {} Hz", sysclk_freq);
 
-        // Initialize driver pins and button interrupt
         init_driver_pins();
 
-        // Initialize the PWM timer with the given frequency
         let mut timer_pwm = pwm::TimPWM::new(dp.TIM2, &clock_cfg, freq);
         timer_pwm.begin();
 
-        // Initialize motor and phase selectors
-        let mut motor = MotorDriver::new(MotorType::STEPPER, PhasePattern::ABCD, freq);
+        let motor = MotorDriver::new(MotorType::STEPPER, PhasePattern::ABCD, freq);
 
-        // Initialize encoder position tracking
-        let mut encoder_pos = EncoderPosition::new(0, freq, 240);
+        let encoder_pos = EncoderPosition::new(0, freq, 240);
 
-        let mut spi1 = encoder_spi::Spi1DMA::new(dp.SPI1);
-        let _dma = Dma::new(dp.DMA1);
+        let supply = SupplyVoltage::new(200, 69000);
+
+        let spi1 = encoder_spi::Spi1DMA::new(dp.SPI1);
+
+        let dma1 = Dma::new(dp.DMA1);
         dma::enable_mux1();
-        dma::mux(DmaPeriph::Dma1, DmaChannel::C1, DmaInput::Spi1Tx);
+        dma::mux(DmaPeriph::Dma1, DmaChannel::C3, DmaInput::Spi1Tx);
         dma::mux(DmaPeriph::Dma1, DmaChannel::C2, DmaInput::Spi1Rx);
+        dma::mux(DmaPeriph::Dma1, DmaChannel::C1, DmaInput::Adc1);
 
-        // Return the shared and local resources
+        let mut adc1 = Adc::new_adc1(
+            dp.ADC1,
+            AdcDevice::One,
+            Default::default(),
+            clock_cfg.systick(),
+        );
+
+        for i in 0..SAMPLING_COUNT {
+            adc1.set_sequence(ADC1_SEQUENCE[i], i as u8 + 1);
+            adc1.set_input_type(ADC1_SEQUENCE[i], InputType::SingleEnded);
+            adc1.set_sample_time(ADC1_SEQUENCE[i], SampleTime::T2);
+        }
+        adc1.set_sequence_len(SAMPLING_COUNT as u8);
+
+        adc1.set_align(Align::Left);
+        adc1.enable_interrupt(AdcInterrupt::EndOfSequence);
+
         (
-            Shared { spi1 },
+            Shared { spi1, adc1 },
             Local {
                 timer_pwm,
                 underflow: true,
                 tick_counter: 0,
                 motor,
                 encoder_pos,
+                dma1,
+                supply,
             },
         )
     }
 
-    // Initialization functions
-    // -------------------------
-
-    // Function to initialize driver control pins and configure PWM output pins
     fn init_driver_pins() {
-        // Create a new output pin for driver reset on Port B, Pin 2
         let mut dr_reset = pinout::driver::RESET.init();
-        // Set the driver reset pin high (inactive)
         dr_reset.set_high();
 
-        // Create a new output pin for driver enable on Port A, Pin 4
         let mut dr_en = pinout::driver::ENABLE.init();
-        // Set the driver enable pin high (enabled)
         dr_en.set_high();
     }
 
-    // Interrupt handler and callbacks
-    #[task(binds = TIM2,shared = [spi1], local = [timer_pwm, underflow, tick_counter, motor, encoder_pos])]
+    #[task(binds = TIM2, shared = [spi1, adc1], local = [timer_pwm, underflow, tick_counter, motor, encoder_pos, supply])]
     fn tim2_period_elapsed(mut cx: tim2_period_elapsed::Context) {
         // Clear the update interrupt flag
         cx.local
@@ -131,43 +138,52 @@ mod app {
             .get_timer()
             .clear_interrupt(TimerInterrupt::Update);
 
-        // Increment the tick counter, wrapping around on overflow
-        *cx.local.tick_counter = cx.local.tick_counter.wrapping_add(1);
-
-        // Alternate between PWM and analog callbacks on underflow flag
-        if *cx.local.underflow {
-            // Call the PWM callback
-
-            // Define the speed multiplier
-            let mut speed = 25;
-            let mut duty = 0.2;
-
-            // Get the current counter value
-            let counter = *cx.local.tick_counter;
-            
-            let mut res: u16 = 0;
-            cx.shared.spi1.lock(|spi1| {
-                res = spi1.get_angle();
-            });
-            cx.local.encoder_pos.tick(res);
-
-            let mut pwm: i16 = (i16::MAX as f32 * duty) as i16;
-            let pos = cx.local.encoder_pos.position();
-            let pwm_values = cx.local.motor.tick((counter.wrapping_mul(speed), pwm), pos);
-
-            // Set the PWM duties on the timer
-            cx.local.timer_pwm.apply_pwm(pwm_values);
-
-            // defmt::println!("Data read: {:?}", res);
-            // defmt::println!("Encoder position: {:?}", pos);
-        } else {
-            // Call the analog callback function (placeholder)
-            // TODO: Implement ADC reading
-            encoder_begin_read::spawn().expect("can not spawn on_spi_transfer");
-        }
-
         // Toggle the underflow flag
         *cx.local.underflow = !*cx.local.underflow;
+
+        // Alternate between PWM and encoder reading
+        if *cx.local.underflow {
+            // Increment the tick counter, wrapping around on overflow
+            *cx.local.tick_counter = cx.local.tick_counter.wrapping_add(2);
+            // Set the PWM duties on the timer
+            cx.local.timer_pwm.apply_pwm(cx.local.motor.get_pwm());
+
+            cx.local.supply.tick(unsafe { ADC_READ_BUF[2] >> 1 });
+
+            // Start next iter calculations
+            let speed = 25;
+            let voltage = 2000;
+
+            let duty = (voltage << 15) / (cx.local.supply.voltage_mv() + 1);
+            let pwm = if duty > i16::MAX as i32 {i16::MAX} else {duty as i16};
+            // let mut duty = 0.2;
+            let counter = *cx.local.tick_counter;
+            // Get encoder angle
+            let res: u16 = cx.shared.spi1.lock(|spi1| spi1.get_angle());
+            cx.local.encoder_pos.tick(res);
+
+            // Get encoder position
+            let pos = cx.local.encoder_pos.position();
+
+            // Calculate pwm states
+            cx.local.motor.tick((counter.wrapping_mul(speed), pwm), pos);
+        } else {
+            // Start ADC DMA reading
+            cx.shared.adc1.lock(|adc| {
+                unsafe {
+                    adc.read_dma(
+                        &mut ADC_READ_BUF,
+                        &ADC1_SEQUENCE,
+                        DmaChannel::C1,
+                        Default::default(),
+                        DmaPeriph::Dma1,
+                    )
+                };
+            });
+
+            // Start SPI encoder read
+            encoder_begin_read::spawn().expect("Failed to spawn encoder_begin_read");
+        }
     }
 
     #[task(priority = 0, shared = [spi1])]
@@ -177,7 +193,7 @@ mod app {
             spi1.get_spi().transfer_dma(
                 &SPI_WRITE_BUF,
                 &mut SPI_READ_BUF,
-                DmaChannel::C1,
+                DmaChannel::C3,
                 DmaChannel::C2,
                 Default::default(),
                 Default::default(),
@@ -195,17 +211,25 @@ mod app {
         );
         cx.shared.spi1.lock(|spi1| {
             spi1.get_spi()
-                .stop_dma(DmaChannel::C1, Some(DmaChannel::C2), DmaPeriph::Dma1);
+                .stop_dma(DmaChannel::C3, Some(DmaChannel::C2), DmaPeriph::Dma1);
             spi1.get_spi()
-                .cleanup_dma(DmaPeriph::Dma1, DmaChannel::C1, Some(DmaChannel::C2));
+                .cleanup_dma(DmaPeriph::Dma1, DmaChannel::C3, Some(DmaChannel::C2));
             spi1.end(unsafe { SPI_READ_BUF });
         });
     }
-} // End of RTIC app module
 
-// Panic handler using defmt
+    #[task(binds = DMA1_CH1, local = [dma1], shared = [adc1], priority = 1)]
+    fn adc_end_read(cx: adc_end_read::Context) {
+        dma::clear_interrupt(
+            DmaPeriph::Dma1,
+            DmaChannel::C1,
+            DmaInterrupt::TransferComplete,
+        );
+        cx.local.dma1.stop(DmaChannel::C1);
+    }
+}
+
 #[defmt::panic_handler]
 fn panic() -> ! {
-    // Trigger an undefined instruction to cause a breakpoint
     cortex_m::asm::udf()
 }

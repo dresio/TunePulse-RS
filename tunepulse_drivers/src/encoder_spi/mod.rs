@@ -1,6 +1,3 @@
-#![no_main]
-#![no_std]
-
 use hal::{
     self,
     gpio::Pin,
@@ -29,7 +26,7 @@ impl Spi1DMA {
         let mut cs_pin = pinout::encoder::SPI1_CS.init();
         cs_pin.set_high();
 
-        let mut spi1 = Spi::new(spi_reg, spi_cfg, BaudRate::Div32);
+        let spi1 = Spi::new(spi_reg, spi_cfg, BaudRate::Div32);
 
         Spi1DMA {
             spi: spi1,

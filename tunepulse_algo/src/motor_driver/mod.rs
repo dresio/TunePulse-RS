@@ -7,7 +7,7 @@ pub struct MotorDriver {
     motor: MotorPWM,
     frequency: u16,
 
-    ready: bool,
+    // ready: bool,
 
     setup: u16,
     iter: u16,
@@ -23,7 +23,7 @@ pub struct MotorDriver {
 }
 
 impl MotorDriver {
-    const test_count: u16 = 4;
+    const TESTS_COUNT: u16 = 4;
     // Constructor for MotorPWM
     pub fn new(
         motor: pwm_control::MotorType,
@@ -33,9 +33,9 @@ impl MotorDriver {
         MotorDriver {
             motor: MotorPWM::new(motor, connection),
             frequency,
-            setup: Self::test_count + 2,
+            setup: Self::TESTS_COUNT + 2,
             iter: 0,
-            ready: false,
+            // ready: false,
             position: 0,
             start_pos: 0,
             pole_count: 50,
@@ -65,11 +65,11 @@ impl MotorDriver {
     }
 
     fn tick_setup(&mut self) -> [i16; 4] {
-        const cal_sequence: [i16; 4] = [0, 16384, -32768, -16384];
+        const CAL_SEQUENCE: [i16; 4] = [0, 16384, -32768, -16384];
         if self.iter == 0 {
-            self.iter = self.frequency / Self::test_count as u16;
+            self.iter = self.frequency / Self::TESTS_COUNT as u16;
             self.setup -= 1;
-            if self.setup == Self::test_count {
+            if self.setup == Self::TESTS_COUNT {
                 self.start_pos = self.position;
             } else if self.setup == 0 {
                 let pos_diff = self.start_pos - self.position;
@@ -77,7 +77,7 @@ impl MotorDriver {
                 // self.pole_count = Self::calc_pole_count(pos_diff);
                 return [0; 4];
             }
-            let angle = cal_sequence[(self.setup + 1) as usize % 4];
+            let angle = CAL_SEQUENCE[(self.setup + 1) as usize % 4];
             self.pwm = self.motor.tick_angle((angle, 6400));
         }
         self.iter -= 1;
@@ -99,7 +99,7 @@ impl MotorDriver {
     fn calc_pole_count(diff: i32) -> u16 {
         let diff = diff.abs();
         if diff == 0 {return 0;}
-        ((((u16::MAX as i32) * Self::test_count as i32 ) / diff) ) as u16
+        ((((u16::MAX as i32) * Self::TESTS_COUNT as i32 ) / diff) ) as u16
     }
 
     #[inline(always)]
@@ -114,5 +114,9 @@ impl MotorDriver {
 
     pub fn is_ready(&self) -> bool {
         self.setup == 0
+    }
+
+    pub fn get_pwm(&mut self) -> [i16;4] {
+        self.pwm
     }
 }

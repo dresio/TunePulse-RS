@@ -45,7 +45,7 @@ mod app {
 
         let _dma = Dma::new(dp.DMA1);
         dma::enable_mux1();
-        dma::mux(DmaPeriph::Dma1, DmaChannel::C1, DmaInput::Spi1Tx);
+        dma::mux(DmaPeriph::Dma1, DmaChannel::C3, DmaInput::Spi1Tx);
         dma::mux(DmaPeriph::Dma1, DmaChannel::C2, DmaInput::Spi1Rx);
 
         let mut encoder = EncoderPosition::new(0, freq, 128);
@@ -72,7 +72,7 @@ mod app {
             spi1.get_spi().transfer_dma(
                 &SPI_WRITE_BUF,
                 &mut SPI_READ_BUF,
-                DmaChannel::C1,
+                DmaChannel::C3,
                 DmaChannel::C2,
                 Default::default(),
                 Default::default(),
@@ -94,9 +94,9 @@ mod app {
         let mut res: u16 = 0;
         cx.shared.spi1.lock(|spi1| {
             spi1.get_spi()
-                .stop_dma(DmaChannel::C1, Some(DmaChannel::C2), DmaPeriph::Dma1);
+                .stop_dma(DmaChannel::C3, Some(DmaChannel::C2), DmaPeriph::Dma1);
             spi1.get_spi()
-                .cleanup_dma(DmaPeriph::Dma1, DmaChannel::C1, Some(DmaChannel::C2));
+                .cleanup_dma(DmaPeriph::Dma1, DmaChannel::C3, Some(DmaChannel::C2));
             res = spi1.end(unsafe { SPI_READ_BUF });
         });
 
