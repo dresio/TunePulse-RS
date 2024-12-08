@@ -48,7 +48,8 @@ mod app {
         dma::mux(DmaPeriph::Dma1, DmaChannel::C3, DmaInput::Spi1Tx);
         dma::mux(DmaPeriph::Dma1, DmaChannel::C2, DmaInput::Spi1Rx);
 
-        let mut encoder = EncoderPosition::new(0, freq, 128);
+        let mut encoder = EncoderPosition::new(freq);
+        encoder.set_alpha(220);
 
         let mut timer = Timer::new_tim3(dp.TIM3, freq as f32, Default::default(), &clock_cfg);
         timer.enable_interrupt(TimerInterrupt::Update);

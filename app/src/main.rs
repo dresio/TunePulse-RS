@@ -79,7 +79,7 @@ mod app {
 
         let motor = MotorDriver::new(MotorType::STEPPER, PhasePattern::ABCD, freq);
 
-        let encoder_pos = EncoderPosition::new(0, freq, 240);
+        let encoder_pos = EncoderPosition::new(freq);
 
         let supply = SupplyVoltage::new(200, 69000);
 
@@ -144,7 +144,7 @@ mod app {
         // Alternate between PWM and encoder reading
         if *cx.local.underflow {
             // Increment the tick counter, wrapping around on overflow
-            *cx.local.tick_counter = cx.local.tick_counter.wrapping_add(2);
+            // *cx.local.tick_counter = cx.local.tick_counter.wrapping_add(2);
             // Set the PWM duties on the timer
             cx.local.timer_pwm.apply_pwm(cx.local.motor.get_pwm());
 
@@ -152,12 +152,12 @@ mod app {
 
             // Start next iter calculations
             let speed = 25;
-            let voltage = 2000;
+            let voltage = 1000;
 
             let duty = (voltage << 15) / (cx.local.supply.voltage_mv() + 1);
             let pwm = if duty > i16::MAX as i32 {i16::MAX} else {duty as i16};
             // let mut duty = 0.2;
-            let counter = *cx.local.tick_counter;
+            // let counter = *cx.local.tick_counter;
             // Get encoder angle
             let res: u16 = cx.shared.spi1.lock(|spi1| spi1.get_angle());
             cx.local.encoder_pos.tick(res);
@@ -166,7 +166,7 @@ mod app {
             let pos = cx.local.encoder_pos.position();
 
             // Calculate pwm states
-            cx.local.motor.tick((counter.wrapping_mul(speed), pwm), pos);
+            cx.local.motor.tick((speed, pwm), pos);
         } else {
             // Start ADC DMA reading
             cx.shared.adc1.lock(|adc| {

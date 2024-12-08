@@ -1,7 +1,7 @@
 // Defining the PositionFilter struct that implements the position filtering logic.
 pub struct FilterLPF {
     // Inputs
-    pub alpha: u32, // Filter coefficient (0..255 = 0.0..1.0)
+    alpha: u32, // Filter coefficient (0..255 = 0.0..1.0)
 
     // Outputs
     output: u16,
@@ -74,6 +74,11 @@ impl FilterLPF {
     /// Function to retrieve the output value
     pub fn get_output(&self) -> u16 {
         self.output
+    }
+
+    /// Function to retrieve the output value
+    pub fn set_alpha(&mut self, alpha: u8) {
+        self.alpha = alpha as u32;
     }
 
     #[inline]

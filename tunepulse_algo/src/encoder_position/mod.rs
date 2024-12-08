@@ -8,7 +8,6 @@ pub struct EncoderPosition {
     position: i32,                   // Combined value (rotations + angle)
     rotations: i16,                  // Full rotations count
     angle: u16,                      // Shaft angle
-    pub alpha: u8,                   // Filtering coefficient (0 <..> 255)
     filter: FilterLPF,             // Position filter instance
     speed_estimator: SpeedEstimator, // Speed estimator instance
     prev_sector: i16,                // Previous angle for zero-cross detection
@@ -16,18 +15,17 @@ pub struct EncoderPosition {
 
 impl EncoderPosition {
     /// Creates new encoder handler instance
-    pub fn new(raw_angle: u16, freq: u16, alpha: u8) -> Self {
+    pub fn new(freq: u16) -> Self {
         // Set zero position as beginning
-        let init_position = (raw_angle as u32) as i32;
+        let init_position = 0;
         // Init filter with input values as default
-        let filter = FilterLPF::new(raw_angle, alpha);
+        let filter = FilterLPF::new(0, 0);
         // Init speed estimator with input values as default
         let speed_estimator = SpeedEstimator::new(init_position, freq);
         Self {
             position: init_position,
             rotations: 0,
-            angle: raw_angle,
-            alpha,
+            angle: 0,
             filter,
             speed_estimator,
             prev_sector: 2,
@@ -50,8 +48,6 @@ impl EncoderPosition {
 
         // Calculate instant speed based on position change
         self.speed_estimator.tick(self.position);
-
-        
     }
 
     /// Detects zero-crossings and updates the rotation count accordingly.
@@ -87,5 +83,10 @@ impl EncoderPosition {
     /// Getter for speed, returns i32 (i16 RPM + u16 fractional part)
     pub fn speed(&self) -> i32 {
         self.speed_estimator.get_speed()
+    }
+
+    /// Getter for speed, returns i32 (i16 RPM + u16 fractional part)
+    pub fn set_alpha(&mut self, alpha: u8) {
+        self.filter.set_alpha(alpha);
     }
 }
