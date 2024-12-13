@@ -9,6 +9,7 @@ members = [
     "test/adc_dma",
 ]
 
+
 # cargo build/run
 [profile.dev]
 codegen-units = 1

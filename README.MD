@@ -12,7 +12,7 @@
 - Feature compatibility with multiple interfaces (`STEP-DIR`, `UART`, `I2C`, `CAN/CAN-FD`, `USB`)
 - Support various protocols (`GCODE`, `KLIPPER`, etc.)
 
-Its primary goal is to advance the development of closed-loop systems and simplify their integration into existing applications.
+Its primary goal is to advance the development of closed-loop systems and simplify their integration into existing 32bit MCU applications.
 
 > **Note**: This firmware is under active development and currently lacks documentation.
 >  For more information, join the Creapunk community on [Discord](https://discord.gg/V4aJdTja8v).
@@ -47,10 +47,16 @@ After flashing, the controller should cycle through the Red, Green, and Blue LED
 
 1. Connect your computer to the ST-Link port on the programmer.
 2. Connect the controller to the programmer's single port.
-3. Run the following command to flash the firmware:
+3. Run the following command to flash main firmware to CLN17 V2:
 
 ```bash
-cargo run --package blink
+cargo run --package app
+```
+
+or this if you whant to get access to debug messages (tested on Windows PowerShell)
+
+```bash
+$env:DEFMT_LOG = "debug"; cargo run --package app
 ```
 
 ------
@@ -72,8 +78,12 @@ cargo run --package blink
 - ☑️ Phase commutation algorithm based on a predefined pattern
 - ☑️ Fast sine/cosine calculation via lookup table
 
+### Calibration
+- ☑️ Pole count calculation
+- ☑️ Lookup calibration table
+
 ### Drivers
 
 - ☑️ PWM center-aligned timer
 - ☑️ Encoder readings with DMA
-- ☐ ADC voltage and current readings with DMA
+- ☑️ ADC voltage and current readings with DMA

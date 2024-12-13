@@ -10,10 +10,12 @@ enum CalStage {
     FirstStep,
     SearchZero, // Stage where the system searches for a reference "zero" position
     /// Perform the full 200-step calibration cycle to map the motor's electrical angle to its mechanical position in the clockwise direction.
-    FullRotationCW,
+    FullRotationPositive,
     /// Perform the full 200-step calibration cycle to map the motor's electrical angle to its mechanical position in the counterclockwise direction.
-    FullRotationCCW,
+    FullRotationNegative,
+    Normalization,
     Error,
+    Validate,
     Done,
 }
 
@@ -42,14 +44,14 @@ pub struct AngleCalibrator {
     angle_el: u16,    // Electrical angle of the motor (0..65535), used to control phase
     ang_el_step: u16, // Defines how many steps to move in one sub-cycle
 
-    cal_idx: u16, // Index for counting steps during calibration cycles
+    cal_idx: usize, // Index for counting steps during calibration cycles
     // cal_table: [i32; Self::CAL_TABLE_SIZE], // Array for storing sampled encoder data during full calibration
     oversampled_pos: i32, // Accumulator for averaging positions during oversampling (Sampling stage)
 
-    time_in_state: u16, // Counter for how many ticks remain in the current calibration sub-stage
+    time_in_state: usize, // Counter for how many ticks remain in the current calibration sub-stage
 
-    direction: i16, // Current rotation direction (1 for forward, -1 for backward)
-    speed: i16,     // Speed (steps per tick) during calibration
+    direction: isize, // Current rotation direction (1 for forward, -1 for backward)
+    speed: isize,     // Speed (steps per tick) during calibration
 
     init_pos: i32, // Position recorded at the start of a calibration step
     temp_pos: i32, // Temporary position for measuring movement increments
@@ -57,16 +59,14 @@ pub struct AngleCalibrator {
     dif_min: i32,  // Minimum difference in step measurement for consistency checks
 
     cal_table: CalibrationTable,
-
-    error_count: u16,
 }
 
 // Constants used during calibration
 impl AngleCalibrator {
-    const CAL_OVERSEMPLING: u16 = 64; // Number of samples per oversampling period for averaging
-    const CAL_SETTLING_TIME: u16 = 256; // Number of ticks to wait for the motor to settle before sampling
-    const CAL_SPEED: i16 = 32; // Speed used during calibration steps (angle increments per tick)
-    const CAL_FIRST_STEP_USTEPS: u16 = 16;
+    const CAL_OVERSEMPLING: usize = 64; // Number of samples per oversampling period for averaging
+    const CAL_SETTLING_TIME: usize = 256; // Number of ticks to wait for the motor to settle before sampling
+    const CAL_SPEED: isize = 32; // Speed used during calibration steps (angle increments per tick)
+    const CAL_FIRST_STEP_USTEPS: usize = 16;
     //---------------------------------------------------------
     // Description of the Calibration Algorithm and Steps:
     //
@@ -121,8 +121,6 @@ impl AngleCalibrator {
             dif_min: i32::MAX, // Initialize to very large number for comparison
 
             cal_table: CalibrationTable::new(),
-
-            error_count: 0,
         }
     }
 
@@ -168,10 +166,10 @@ impl AngleCalibrator {
                         self.dif_min = i32::MAX;
 
                         // Set up for the FirstStep stage (16 steps)
-                        self.ang_el_step = u16::MAX / Self::CAL_FIRST_STEP_USTEPS;
+                        self.ang_el_step = u16::MAX / Self::CAL_FIRST_STEP_USTEPS as u16;
                         self.cal_idx = Self::CAL_FIRST_STEP_USTEPS;
                         self.calibration_stage = CalStage::FirstStep;
-                        defmt::println!("Calibration: TEST MOTION");
+                        defmt::info!("CALIBRATION: Test single pole motion");
                     }
                 }
 
@@ -186,7 +184,7 @@ impl AngleCalibrator {
                         // After completing all test steps, analyze results
                         let travel = self.init_pos - self.temp_pos; // Total travel during test
                         let direction = travel.signum(); // Determine direction of motion
-                        self.direction = direction as i16;
+                        self.direction = direction as isize;
 
                         // Average step size
                         let avg_step = (travel * direction) / Self::CAL_FIRST_STEP_USTEPS as i32;
@@ -194,13 +192,13 @@ impl AngleCalibrator {
 
                         if avg_step < diviation * 2 {
                             // If the variation is too large, calibration fails
-                            defmt::println!("Calibration: ERROR");
+                            defmt::error!("CALIBRATION: Too much deviation while moving");
                             self.calibration_stage = CalStage::Error;
                             return self.angle_el;
                         }
 
                         // Proceed with a known direction
-                        defmt::println!("Calibration: DIRECTION: {}", direction);
+                        defmt::debug!("CALIBRATION: Detected motion direction: {}", self.direction);
 
                         // Prepare for the SearchZero stage
                         self.cal_idx = 0;
@@ -215,32 +213,25 @@ impl AngleCalibrator {
                 }
 
                 CalStage::SearchZero => {
-                    // Move until crossing zero
-                    // if stable_pos < 0 {
-                    // Once zero is found, start full rotation calibration in CW direction
-                    self.calibration_stage = CalStage::FullRotationCW;
+                    self.calibration_stage = CalStage::FullRotationPositive;
                     self.speed = -self.speed; // Adjust speed direction
                     self.cal_idx = 0;
-                    defmt::println!("Calibration: GO CALIBRATION RUN CW");
+                    defmt::info!("CALIBRATION: Full rotation in positive direction with samling");
                     self.init_pos = stable_pos;
-                    // }
+                    self.cal_table.reset(4);
                 }
 
-                CalStage::FullRotationCW => {
-                    // Perform a full rotation in CW direction
-                    let avg_step = (stable_pos - self.init_pos) / (self.cal_idx as i32 + 1);
+                // Perform a full rotation in positive direction
+                CalStage::FullRotationPositive => {
+                    // Make some margin to allow full rotation calibration
+                    let avg_step = ((stable_pos - self.init_pos) / (self.cal_idx as i32 + 1)) / 4;
                     if stable_pos - self.init_pos > u16::MAX as i32 + (avg_step / 4) {
                         // Once we exceed the maximum range, switch to CCW run
-                        self.calibration_stage = CalStage::FullRotationCCW;
-                        defmt::println!(
-                            "Calibration: STEPS COUNT: {}; ER COUNT: {}",
-                            self.cal_idx,
-                            self.error_count
+                        self.calibration_stage = CalStage::FullRotationNegative;
+                        defmt::debug!("CALIBRATION: Position count: {}", self.cal_idx);
+                        defmt::info!(
+                            "CALIBRATION: Full rotation in negative direction with samling"
                         );
-                        if self.cal_idx != 200 {
-                            self.error_count += 1;
-                        }
-                        defmt::println!("Calibration: GO CALIBRATION RUN CCW");
                         self.speed = -self.speed;
                         return self.angle_el;
                     }
@@ -255,7 +246,7 @@ impl AngleCalibrator {
                     // }
                 }
 
-                CalStage::FullRotationCCW => {
+                CalStage::FullRotationNegative => {
                     // Perform a full rotation in CCW direction
                     self.cal_idx -= 1;
                     self.cal_table.fill_second(self.cal_idx, stable_pos as u16);
@@ -263,15 +254,36 @@ impl AngleCalibrator {
                     if self.cal_idx == 0 {
                         // Once we return to zero, calibration is complete
                         // self.motor_status = MotorStatus::Ready;
-                        self.calibration_stage = CalStage::Settle;
-                        // self.cal_table.print();
-                        self.cal_table.get_min();
-                        self.cal_table.normalize();
-                        self.cal_table.print();
-                        // defmt::println!("Clibration: Diff: {}", self.cal_table3);
-                        defmt::println!("NORMAL RUN INITIATED");
+                        self.calibration_stage = CalStage::Normalization;
+                        defmt::info!("CALIBRATION: Finished. Next => NORMAL RUN");
+
                         self.angle_el = 0;
-                    }
+                        // self.speed = 0;
+                    };
+                }
+
+                CalStage::Normalization => {
+                    self.cal_table.normalize();
+                    self.cal_table.print();
+                    self.cal_table.validate();
+                    self.calibration_stage = CalStage::Done;
+                    // self.calibration_stage = CalStage::Settle;
+                }
+
+                CalStage::Validate => {
+                    // if self.cal_idx == 0 {
+                    //     self.cal_idx = 500;
+                    // }
+                    // self.cal_idx -=1;
+                    let pos = self.cal_table.correct_pos(stable_pos as u16);
+
+                    defmt::trace!(
+                        "Real: {}; Corrected: {}; Dif: {}; El: {}",
+                        stable_pos as u16,
+                        pos.0,
+                        (stable_pos as u16).wrapping_sub(pos.0),
+                        pos.1 as i16
+                    );
                 }
 
                 CalStage::Error => {}
@@ -307,7 +319,7 @@ impl AngleCalibrator {
                 // Prepare for a new calibration cycle
                 self.oversampled_pos = 0; // Reset oversampling accumulator
                 self.cal_cycle_stage = CalSamplingState::Rotating; // Next state: Rotating
-                self.time_in_state = steps / self.speed.abs() as u16; // Calculate how long to rotate
+                self.time_in_state = steps as usize / self.speed.abs() as usize; // Calculate how long to rotate
                 i32::MIN // Not finished yet
             }
 
@@ -361,7 +373,7 @@ impl AngleCalibrator {
     /// # Arguments
     /// * `increment` - how much to add to angle_el per tick
     #[inline(always)]
-    fn move_at_speed(&mut self, increment: i16) {
+    fn move_at_speed(&mut self, increment: isize) {
         let new_angle = self.angle_el.wrapping_add(increment as u16); // Wrap around if overflow
         self.angle_el = new_angle; // Update the motor's electrical angle
     }
@@ -395,7 +407,7 @@ impl AngleCalibrator {
     ///
     /// Returns true when oversampling completes, false otherwise.
     #[inline(always)]
-    fn cal_oversampling(position: i32, iter: &mut u16, integral: &mut i32) -> bool {
+    fn cal_oversampling(position: i32, iter: &mut usize, integral: &mut i32) -> bool {
         *integral += position; // Add current position to the integral
         *iter -= 1; // Decrease iteration count
         if *iter == 0 {
@@ -420,7 +432,7 @@ impl AngleCalibrator {
     /// * `false` while counter > 0
     /// * `true` when the counter reaches 0
     #[inline(always)]
-    fn iter(counter: &mut u16) -> bool {
+    fn iter(counter: &mut usize) -> bool {
         if *counter > 0 {
             *counter -= 1; // Decrement the counter
             false // Still have ticks left
@@ -430,13 +442,7 @@ impl AngleCalibrator {
     }
 
     #[inline(always)]
-    fn get_pos_by_index(index: u16) -> u16 {
-        let offset: u16 = 10;
-        let num_poles: u16 = 200;
-        let table: [u16; 200] = [0; 200];
-        let restored_val = (num_poles * index * table[index as usize]) / 200;
-        let value = restored_val.wrapping_add(offset);
-
-        return value;
+    pub fn get_correction(&self, pos: u16) -> (u16, u16) {
+        self.cal_table.correct_pos(pos)
     }
 }

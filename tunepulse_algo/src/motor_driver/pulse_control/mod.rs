@@ -87,4 +87,8 @@ impl MotorPulse {
         // Return the current motor direction and the number of steps needed.
         return (self.direction, self.steps);
     }
+    
+    pub fn set_ustep_div(&mut self, ustep_pow: u16) {
+        self.ustep = Self::ustep_calc(ustep_pow);
+    }
 }

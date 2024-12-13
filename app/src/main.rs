@@ -70,8 +70,7 @@ mod app {
 
         let freq = 18000;
         let sysclk_freq = clock_cfg.sysclk(); // System clock frequency in Hz
-        defmt::println!("System clock frequency: {} Hz", sysclk_freq);
-
+        defmt::debug!("SYSTEM: Clock frequency is {} MHz", sysclk_freq / 1000000);
         init_driver_pins();
 
         let mut timer_pwm = pwm::TimPWM::new(dp.TIM2, &clock_cfg, freq);

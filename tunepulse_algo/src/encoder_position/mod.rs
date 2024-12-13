@@ -66,4 +66,9 @@ impl EncoderPosition {
     pub fn set_alpha(&mut self, alpha: u8) {
         self.filter.set_alpha(alpha);
     }
+
+    // Call this if ABZ encoder is used at it hit zero very first time
+    pub fn reset(&mut self) {
+        self.position = 0;
+    }
 }

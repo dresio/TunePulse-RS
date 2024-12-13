@@ -1,5 +1,12 @@
 [target.'cfg(all(target_arch = "arm", target_os = "none"))']
-runner = "probe-rs run --chip STM32G431CBUx" # to list chips, run `probe-run --list-chips.` --connect-under-reset
+runner = [
+  "probe-rs",
+  "run",
+  "--chip",
+  "STM32G431CBUx",
+  "--log-format",
+  "{L} {s}",
+]
 
 rustflags = [
   "-C", "linker=flip-link",
@@ -16,3 +23,4 @@ rb = "run --bin"
 rrb = "run --release --bin"
 rr = "run --release"
 br = "build --release"
+rundebug = "DEFMT_LOG=debug cargo run --package "
