@@ -78,7 +78,8 @@ mod app {
 
         let motor = MotorDriver::new(MotorType::STEPPER, PhasePattern::ABCD, freq);
 
-        let encoder_pos = EncoderPosition::new(freq);
+        let mut encoder_pos = EncoderPosition::new(freq);
+        encoder_pos.set_alpha(128);
 
         let supply = SupplyVoltage::new(200, 69000);
 

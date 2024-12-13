@@ -92,9 +92,10 @@ impl MotorDriver {
         match self.motor_status {
             MotorStatus::Ready => {
                 // If calibration is complete, run normal operation logic
-                // let mech_pos = self.angle_calibrator.get_correction(encoder_pos as u16).1;
+                self.angle_el = self.angle_calibrator.get_correction(encoder_pos as u16).1.wrapping_add(u16::MAX >> 2);
                 // let current = voltg_angle.1;
-                self.tick_run(voltg_angle);
+                // self.tick_run(voltg_angle);
+                        self.amplitude = voltg_angle.1;
             }
             MotorStatus::Error => {
                 // If in error state, stop driving the motor by setting amplitude to 0

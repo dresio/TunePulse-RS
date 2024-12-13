@@ -231,8 +231,6 @@ impl CalibrationTable {
         // Re-apply offset to return the corrected angle to the global coordinate system.
         let corrected_angle = result.wrapping_add(self.offset);
 
-
-
         // Compute the mechanical angle mapped into one electrical period.
         let mech_el_angle = ((result as usize * self.cal_size) / self.el_angle_div) as u16;
 
