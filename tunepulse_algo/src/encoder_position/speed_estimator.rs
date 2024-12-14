@@ -27,7 +27,7 @@ impl SpeedEstimator {
         let difference = new_position - self.pos_buffer[self.idx];
 
         // Calculate speed based on sampling frequency (corrected to buffer size)
-        self.speed = (difference * self.freq as i32) / SIZE as i32;
+        self.speed = difference.wrapping_mul(self.freq as i32) / SIZE as i32;
 
         // Update buffer
         self.pos_buffer[self.idx] = new_position;

@@ -15,7 +15,6 @@ crate-type = ["rlib"]  # Makes the library reusable for no_std and std
 
 [dependencies]
 hal = { package = "stm32-hal2", version = "^1.8.0", features = ["g431", "g4rt"]}
-
 # Define dependencies here, e.g., math or embedded utilities
 
 [features]

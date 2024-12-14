@@ -70,8 +70,7 @@ mod app {
 
         let freq = 18000;
         let sysclk_freq = clock_cfg.sysclk(); // System clock frequency in Hz
-        defmt::println!("System clock frequency: {} Hz", sysclk_freq);
-
+        defmt::debug!("SYSTEM: Clock frequency is {} MHz", sysclk_freq / 1000000);
         init_driver_pins();
 
         let mut timer_pwm = pwm::TimPWM::new(dp.TIM2, &clock_cfg, freq);
@@ -79,7 +78,8 @@ mod app {
 
         let motor = MotorDriver::new(MotorType::STEPPER, PhasePattern::ABCD, freq);
 
-        let encoder_pos = EncoderPosition::new(freq);
+        let mut encoder_pos = EncoderPosition::new(freq);
+        encoder_pos.set_alpha(128);
 
         let supply = SupplyVoltage::new(200, 69000);
 
