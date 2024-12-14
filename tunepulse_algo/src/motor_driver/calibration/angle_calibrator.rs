@@ -52,6 +52,7 @@ pub struct AngleCalibrator {
 
     direction: isize, // Current rotation direction (1 for forward, -1 for backward)
     speed: isize,     // Speed (steps per tick) during calibration
+    settling_time: usize, // Settling time in milliseconds
 
     init_pos: i32, // Position recorded at the start of a calibration step
     temp_pos: i32, // Temporary position for measuring movement increments
@@ -59,14 +60,17 @@ pub struct AngleCalibrator {
     dif_min: i32,  // Minimum difference in step measurement for consistency checks
 
     cal_table: CalibrationTable,
+    el_step_idx: u16
 }
 
 // Constants used during calibration
 impl AngleCalibrator {
-    const CAL_OVERSEMPLING: usize = 64; // Number of samples per oversampling period for averaging
-    const CAL_SETTLING_TIME: usize = 256; // Number of ticks to wait for the motor to settle before sampling
-    const CAL_SPEED: isize = 32; // Speed used during calibration steps (angle increments per tick)
-    const CAL_FIRST_STEP_USTEPS: usize = 16;
+    const CAL_SETTLING_TIME_US: usize = 20000; // Settling time in milliseconds
+    const CAL_SPEED_US: usize = 1000; // Speed in angle increments per millisecond
+
+    const CAL_OVERSEMPLING: usize = 128; // Number of samples per oversampling period for averaging
+    const CAL_FIRST_STEP_USTEPS: u16 = 16;
+
     //---------------------------------------------------------
     // Description of the Calibration Algorithm and Steps:
     //
@@ -97,6 +101,8 @@ impl AngleCalibrator {
     /// * `connection` - Phase pattern configuration
     /// * `frequency` - Number of ticks per second
     pub fn new(frequency: u16) -> Self {
+        let settling_time = Self::calculate_settling_time(frequency, Self::CAL_SETTLING_TIME_US);
+
         Self {
             frequency,   // Store the update frequency
             position: 0, // Initialize encoder position to 0
@@ -113,7 +119,9 @@ impl AngleCalibrator {
 
             ang_el_step: 0,         // Initialize calibration steps counter
             direction: 0,           // No direction initially
-            speed: Self::CAL_SPEED, // Use the predefined calibration speed
+            speed: 1, // Use the predefined calibration speed
+            settling_time, // Use the calculated settling time
+
 
             init_pos: 0,       // Initial position placeholder
             temp_pos: 0,       // Temporary position placeholder
@@ -121,6 +129,7 @@ impl AngleCalibrator {
             dif_min: i32::MAX, // Initialize to very large number for comparison
 
             cal_table: CalibrationTable::new(),
+            el_step_idx: 0,
         }
     }
 
@@ -150,7 +159,7 @@ impl AngleCalibrator {
                     // After settling, move to the Setup stage
                     self.cal_idx = 10; // Arbitrary index setting for demonstration
                     self.calibration_stage = CalStage::Setup;
-                    self.speed = Self::CAL_SPEED;
+                    self.speed = Self::calculate_speed(self.frequency, Self::CAL_SPEED_US);
                     return self.angle_el;
                 }
 
@@ -166,8 +175,8 @@ impl AngleCalibrator {
                         self.dif_min = i32::MAX;
 
                         // Set up for the FirstStep stage (16 steps)
-                        self.ang_el_step = u16::MAX / Self::CAL_FIRST_STEP_USTEPS as u16;
-                        self.cal_idx = Self::CAL_FIRST_STEP_USTEPS;
+                        self.ang_el_step = u16::MAX / Self::CAL_FIRST_STEP_USTEPS;
+                        self.cal_idx = Self::CAL_FIRST_STEP_USTEPS as usize;
                         self.calibration_stage = CalStage::FirstStep;
                         defmt::info!("CALIBRATION: Test single pole motion");
                     }
@@ -183,14 +192,15 @@ impl AngleCalibrator {
                     if Self::iter(&mut self.cal_idx) {
                         // After completing all test steps, analyze results
                         let travel = self.init_pos - self.temp_pos; // Total travel during test
+                       
                         let direction = travel.signum(); // Determine direction of motion
                         self.direction = direction as isize;
 
                         // Average step size
                         let avg_step = (travel * direction) / Self::CAL_FIRST_STEP_USTEPS as i32;
-                        let diviation = self.dif_max - self.dif_min;
+                        let deviation = self.dif_max - self.dif_min;
 
-                        if avg_step < diviation * 2 {
+                        if avg_step < deviation {
                             // If the variation is too large, calibration fails
                             defmt::error!("CALIBRATION: Too much deviation while moving");
                             self.calibration_stage = CalStage::Error;
@@ -205,7 +215,7 @@ impl AngleCalibrator {
                         // self.cal_el_ang_step = u16::MAX / 4;
                         // self.cal_el_ang_init = ;
                         self.ang_el_step = u16::MAX / 4;
-                        self.speed = Self::CAL_SPEED * self.direction; // Move at a calibrated speed
+                        self.speed = self.speed * self.direction; // Move at a calibrated speed
 
                         // defmt::println!("Calibration: GO TO ZERO");
                         self.calibration_stage = CalStage::SearchZero;
@@ -224,8 +234,8 @@ impl AngleCalibrator {
                 // Perform a full rotation in positive direction
                 CalStage::FullRotationPositive => {
                     // Make some margin to allow full rotation calibration
-                    let avg_step = ((stable_pos - self.init_pos) / (self.cal_idx as i32 + 1)) / 4;
-                    if stable_pos - self.init_pos > u16::MAX as i32 + (avg_step / 4) {
+                    let avg_step = (stable_pos - self.init_pos) / (self.cal_idx as i32 + 1);
+                    if stable_pos - self.init_pos > u16::MAX as i32 + (avg_step / 3) {
                         // Once we exceed the maximum range, switch to CCW run
                         self.calibration_stage = CalStage::FullRotationNegative;
                         defmt::debug!("CALIBRATION: Position count: {}", self.cal_idx);
@@ -320,6 +330,7 @@ impl AngleCalibrator {
                 self.oversampled_pos = 0; // Reset oversampling accumulator
                 self.cal_cycle_stage = CalSamplingState::Rotating; // Next state: Rotating
                 self.time_in_state = steps as usize / self.speed.abs() as usize; // Calculate how long to rotate
+                self.el_step_idx = self.angle_el.wrapping_add((steps as i32 * self.speed.signum() as i32) as u16);
                 i32::MIN // Not finished yet
             }
 
@@ -330,7 +341,8 @@ impl AngleCalibrator {
                 if Self::iter(&mut self.time_in_state) {
                     // Once done rotating, move to Waiting state
                     self.cal_cycle_stage = CalSamplingState::Waiting;
-                    self.time_in_state = Self::CAL_SETTLING_TIME; // Settle time
+                    self.time_in_state = self.settling_time; // Settle time
+                    self.angle_el = self.el_step_idx; // Fine tune angle to 
                 }
                 i32::MIN // Still not finished
             }
@@ -444,5 +456,29 @@ impl AngleCalibrator {
     #[inline(always)]
     pub fn get_correction(&self, pos: u16) -> (u16, u16) {
         self.cal_table.correct_pos(pos)
+    }
+
+        /// Calculate speed in ticks per millisecond.
+    ///
+    /// # Arguments
+    /// * `frequency` - Number of ticks per second
+    /// * `speed_ms` - Desired speed in milliseconds
+    ///
+    /// Returns the calculated speed in ticks.
+    #[inline(always)]
+    fn calculate_speed(frequency: u16, speed_us: usize) -> isize {
+        ((frequency as usize * speed_us) / 1000000) as isize
+    }
+
+    /// Calculate settling time in ticks based on frequency and milliseconds.
+    ///
+    /// # Arguments
+    /// * `frequency` - Number of ticks per second
+    /// * `settling_ms` - Desired settling time in milliseconds
+    ///
+    /// Returns the calculated settling time in ticks.
+    #[inline(always)]
+    fn calculate_settling_time(frequency: u16, settling_us: usize) -> usize {
+        (frequency as usize * settling_us) / 1000000
     }
 }

@@ -27,7 +27,7 @@ impl EncoderPosition {
     /// Updates the encoder state, including position filtering, zero-cross detection, and speed estimation.
     pub fn tick(&mut self, input_pos: u16) {
         // Update the filter with the new input position and handle overflow
-        self.filter.tick_oflw(input_pos);
+        self.filter.tick(input_pos);
 
         // Retrieve the previous angle by casting the current position to u16
         let prev_angle: u16 = self.position as u16;
