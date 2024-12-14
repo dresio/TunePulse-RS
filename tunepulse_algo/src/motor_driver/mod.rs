@@ -8,6 +8,8 @@ pub mod calibration;
 
 use calibration::angle_calibrator::AngleCalibrator;
 
+use crate::math_integer::filters::lpf::FilterLPF;
+
 /// Represents the motor's overall calibration status.
 enum MotorStatus {
     /// Motor is currently undergoing calibration.
@@ -33,12 +35,11 @@ pub struct MotorDriver {
     speed: i16,     // Speed (steps per tick) during calibration
 
     angle_calibrator: AngleCalibrator,
+    filter: FilterLPF,
 }
 
 // Constants used during calibration
 impl MotorDriver {
-    const CAL_SPEED: i16 = 32; // Speed used during calibration steps (angle increments per tick)
-
     /// Create a new MotorDriver instance.
     ///
     /// # Arguments
@@ -63,9 +64,10 @@ impl MotorDriver {
             amplitude: 6400, // Initial amplitude used during calibration, arbitrary chosen value
 
             direction: 0,           // No direction initially
-            speed: Self::CAL_SPEED, // Use the predefined calibration speed
+            speed: 0, // Use the predefined calibration speed
 
             angle_calibrator: AngleCalibrator::new(frequency),
+            filter: FilterLPF::new(0, 220),
         }
     }
 
@@ -92,7 +94,7 @@ impl MotorDriver {
         match self.motor_status {
             MotorStatus::Ready => {
                 // If calibration is complete, run normal operation logic
-                self.angle_el = self.angle_calibrator.get_correction(encoder_pos as u16).1.wrapping_add(u16::MAX >> 2);
+                self.angle_el = self.filter.tick(self.angle_calibrator.get_correction(encoder_pos as u16).1.wrapping_add(u16::MAX >> 2));
                 // let current = voltg_angle.1;
                 // self.tick_run(voltg_angle);
                         self.amplitude = voltg_angle.1;
@@ -107,6 +109,7 @@ impl MotorDriver {
                 if self.angle_calibrator.is_ready() {
                     self.motor_status = MotorStatus::Ready
                 }
+                self.amplitude = voltg_angle.1;
             }
         }
 
@@ -117,40 +120,6 @@ impl MotorDriver {
         self.pwm // Return the updated PWM array
     }
 
-    //---------------------------------------------------------
-    // tick_run() Method Steps:
-    //
-    // 1. When calibration is done, normal operation simply sets the motor angle and amplitude directly.
-    // 2. The motor runs according to the external control inputs provided.
-    //---------------------------------------------------------
-
-    /// Normal operation method after calibration is complete.
-    ///
-    /// # Arguments
-    /// * `_voltg_angle` - (angle, amplitude) for normal run mode
-    fn tick_run(&mut self, _voltg_angle: (i16, i16)) {
-        // self.angle_el = _voltg_angle.0 as u16; // Update the electrical angle for normal operation
-        self.move_at_speed(_voltg_angle.0);
-        self.amplitude = _voltg_angle.1; // Update the amplitude for normal operation
-    }
-
-
-    //---------------------------------------------------------
-    // move_at_speed() Method Steps:
-    //
-    // 1. Adjust angle_el by a given increment each tick.
-    // 2. Wrapping arithmetic ensures the angle stays within 0..65535.
-    //---------------------------------------------------------
-
-    /// Inline method for rotating the motor at a given increment per tick.
-    ///
-    /// # Arguments
-    /// * `increment` - how much to add to angle_el per tick
-    #[inline(always)]
-    fn move_at_speed(&mut self, increment: i16) {
-        let new_angle = self.angle_el.wrapping_add(increment as u16); // Wrap around if overflow
-        self.angle_el = new_angle; // Update the motor's electrical angle
-    }
 
     //---------------------------------------------------------
     // is_ready() Method Steps:
@@ -163,16 +132,6 @@ impl MotorDriver {
         matches!(self.motor_status, MotorStatus::Ready) // Returns true if Ready
     }
 
-    //---------------------------------------------------------
-    // get_data() Method Steps:
-    //
-    // 1. Returns a reference to the calibration data array.
-    //---------------------------------------------------------
-
-    // /// Get the calibration data array for analysis.
-    // pub fn get_data(&self) -> &[i32; Self::CAL_TABLE_SIZE] {
-    //     &self.cal_table // Return reference to data array
-    // }
 
     //---------------------------------------------------------
     // change_motor_mode() and change_phase_mode() Steps:
