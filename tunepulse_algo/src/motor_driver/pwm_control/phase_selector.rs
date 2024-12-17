@@ -1,7 +1,12 @@
+use core::default;
+
+use super::PhasePattern;
+
 /// Struct to handle the re-mapping of PWM channels
 pub struct PhaseSelector {
     /// Reference to the current mode
-    pub mode: u8,
+    mode: usize,
+    idxs: [usize; 4],
 }
 
 impl PhaseSelector {
@@ -10,22 +15,35 @@ impl PhaseSelector {
     /// # Arguments
     /// * `mode` - Reference to the current mode.
     /// * `ch_abcd` - Reference to the input array containing PWM channels.
-    pub const fn new(mode: u8) -> PhaseSelector {
-        PhaseSelector { mode }
+    pub const fn new(mode: PhasePattern) -> PhaseSelector {
+        let mode = mode as usize;
+        let idxs = [
+            (mode >> 0) & 0b11,
+            (mode >> 2) & 0b11,
+            (mode >> 4) & 0b11,
+            (mode >> 6) & 0b11,
+        ];
+        PhaseSelector { mode, idxs }
     }
 
     /// Updates the output pattern based on the current mode.
-    pub fn tick(&mut self, voltages: [i16; 4]) -> [i16; 4] {
-        let mut output: [i16; 4] = [i16::MIN; 4];
-        for i in 0..4 {
-            let indx = (self.mode as usize >> (i << 1)) & 0b11;
-            output[i] = voltages[indx];
-        }
-        output
+    #[inline(always)]
+    pub fn tick(&self, voltages: [i16; 4]) -> [i16; 4] {
+        [
+            voltages[self.idxs[0]],
+            voltages[self.idxs[1]],
+            voltages[self.idxs[2]],
+            voltages[self.idxs[3]],
+        ]
     }
 
-    #[inline(always)]
     pub fn change_mode(&mut self, mode: u8) {
-        self.mode = mode;
+        self.mode = mode as usize;
+        self.idxs = [
+            (self.mode >> 0) & 0b11,
+            (self.mode >> 2) & 0b11,
+            (self.mode >> 4) & 0b11,
+            (self.mode >> 6) & 0b11,
+        ];
     }
 }

@@ -36,11 +36,8 @@ mod app {
     // Import custom modules from tunepulse_rs crate
     use tunepulse_algo::{
         analog::supply_voltage::SupplyVoltage,
-        encoder_position::EncoderPosition, // Encoder position handling
-        motor_driver::{
-            pwm_control::{MotorType, PhasePattern},
-            MotorDriver,
-        }, // Motor control modules
+        MotorDriver,
+        motor_driver::pwm_control::{MotorType, PhasePattern}
     };
 
     use tunepulse_drivers::*;
@@ -57,7 +54,6 @@ mod app {
         underflow: bool,
         tick_counter: i16,
         motor: MotorDriver,
-        encoder_pos: EncoderPosition,
         dma1: Dma<DMA1>,
         supply: SupplyVoltage,
     }
@@ -68,7 +64,7 @@ mod app {
         let clock_cfg = Clocks::default();
         clock_cfg.setup().unwrap();
 
-        let freq = 18000;
+        let freq = 20000;
         let sysclk_freq = clock_cfg.sysclk(); // System clock frequency in Hz
         defmt::debug!("SYSTEM: Clock frequency is {} MHz", sysclk_freq / 1000000);
         init_driver_pins();
@@ -77,9 +73,6 @@ mod app {
         timer_pwm.begin();
 
         let motor = MotorDriver::new(MotorType::STEPPER, PhasePattern::ABCD, freq);
-
-        let mut encoder_pos = EncoderPosition::new(freq);
-        // encoder_pos.set_alpha(128);
 
         let supply = SupplyVoltage::new(200, 69000);
 
@@ -115,7 +108,6 @@ mod app {
                 underflow: true,
                 tick_counter: 0,
                 motor,
-                encoder_pos,
                 dma1,
                 supply,
             },
@@ -130,7 +122,7 @@ mod app {
         dr_en.set_high();
     }
 
-    #[task(binds = TIM2, shared = [spi1, adc1], local = [timer_pwm, underflow, tick_counter, motor, encoder_pos, supply])]
+    #[task(binds = TIM2, shared = [spi1, adc1], local = [timer_pwm, underflow, tick_counter, motor, supply])]
     fn tim2_period_elapsed(mut cx: tim2_period_elapsed::Context) {
         // Clear the update interrupt flag
         cx.local
@@ -160,13 +152,9 @@ mod app {
             // let counter = *cx.local.tick_counter;
             // Get encoder angle
             let res: u16 = cx.shared.spi1.lock(|spi1| spi1.get_angle());
-            cx.local.encoder_pos.tick(res);
-
-            // Get encoder position
-            let pos = cx.local.encoder_pos.position();
 
             // Calculate pwm states
-            cx.local.motor.tick((speed, pwm), pos);
+            cx.local.motor.tick((speed, pwm), res);
         } else {
             // Start ADC DMA reading
             cx.shared.adc1.lock(|adc| {

@@ -22,7 +22,7 @@ impl SpeedEstimator {
     }
 
     // Math call
-    pub fn tick(&mut self, new_position: i32) {
+    pub fn tick(&mut self, new_position: i32) -> &Self{
         // Calculate position difference over N = SIZE samples
         let difference = new_position - self.pos_buffer[self.idx];
 
@@ -34,6 +34,7 @@ impl SpeedEstimator {
 
         // Update index value
         self.idx = (self.idx + 1) % SIZE;
+        self
     }
 
     // Getter for instant speed

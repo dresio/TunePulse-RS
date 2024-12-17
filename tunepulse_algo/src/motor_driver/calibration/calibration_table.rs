@@ -1,9 +1,11 @@
+use core::ops::Add;
+
 use defmt_rtt as _; // Use the defmt_rtt crate for logging via RTT (Real-Time Transfer)
 
 /// The main driver struct for the motor, holding all the state required for operation and calibration.
-pub struct CalibrationTable {
+pub struct CalibrationTable<const N: usize> {
     /// Stores sampled encoder data across a full calibration cycle
-    cal_table: [u16; CalibrationTable::CAL_TABLE_SIZE],
+    cal_table: [u16; N],
     /// Current number of valid points collected during calibration
     cal_size: usize,
     /// Divider representing how many steps form one electrical period
@@ -17,8 +19,7 @@ pub struct CalibrationTable {
 }
 
 // Constants and methods used during calibration
-impl CalibrationTable {
-    const CAL_TABLE_SIZE: usize = 200; // Maximum number of calibration points in table
+impl<const N: usize> CalibrationTable<N> {
     const CAL_VAL_RANGE: usize = u16::MAX as usize; // Range of `u16` values (0 to 65535)
 
     /// ## Principle of Operation:
@@ -40,12 +41,12 @@ impl CalibrationTable {
     /// Creates a new `CalibrationTable` with default values.
     pub fn new() -> Self {
         Self {
-            offset: 0,    // Default offset is 0 until calibration determines otherwise
-            start_idx: 0, // Default start index is 0
-            cal_size: 0,  // Initially, no calibration points are filled
-            cal_table: [0; CalibrationTable::CAL_TABLE_SIZE], // The calibration data array, all initialized to zero
-            el_angle_div: 1,  // Default electrical angle divider is 1 (no division)
-            max_deviation: 0, // Initially, no deviation is recorded
+            offset: 0,         // Default offset is 0 until calibration determines otherwise
+            start_idx: 0,      // Default start index is 0
+            cal_size: 0,       // Initially, no calibration points are filled
+            cal_table: [0; N], // The calibration data array, all initialized to zero
+            el_angle_div: 1,   // Default electrical angle divider is 1 (no division)
+            max_deviation: 0,  // Initially, no deviation is recorded
         }
     }
 
@@ -56,39 +57,59 @@ impl CalibrationTable {
         self.el_angle_div = el_angle_div as usize; // Convert el_angle_div to usize for indexing
         self.cal_size = 0; // Clear the size (no valid data points yet)
         self.offset = u16::MAX; // Initialize offset to max, so we can find the minimum value later
+        self.max_deviation = 0;
     }
+
+    fn test_val_sequential(&mut self) {}
 
     /// Stores the first round of calibration data at the given index.
     /// This collects raw samples as the motor is rotated in one direction.
-    pub fn fill_first(&mut self, idx: usize, val: u16) {
-        if idx < CalibrationTable::CAL_TABLE_SIZE {
+    pub fn fill_first(&mut self, idx: usize, val: u16) -> bool {
+        // Each next index should be +1 to prevoius and should not go out limit
+        if idx < N && idx - self.start_idx <= 1 {
+            self.start_idx = idx;
             self.cal_table[idx] = val; // Store the sample value
             self.cal_size = self.cal_size.max(idx + 1); // Update cal_size to ensure it reflects the maximum filled index
+            return true;
         } else {
             // If the index is out of range, log a warning.
             defmt::warn!("CAL TABLE: fill_first: Index {} out of bounds", idx);
+            return false;
         }
     }
 
     /// Performs a second pass of filling data in the opposite direction to remove hysteresis.
     /// This method averages the forward and backward measurements to center the hysteresis loop.
-    pub fn fill_second(&mut self, idx: usize, val: u16) {
-        if idx < CalibrationTable::CAL_TABLE_SIZE {
+    pub fn fill_second(&mut self, idx: usize, val: u16) -> bool {
+        // Each next index should be -1 to prevoius and should not go out limit
+        if idx < N && self.start_idx - idx <= 1 {
+            self.start_idx = idx;
             // Calculate the signed difference to handle potential wraparound (values near 0 or max range).
             let dif = val.wrapping_sub(self.cal_table[idx]) as i16;
 
             // Update the table with the midpoint of the hysteresis range.
-            self.cal_table[idx] = self.cal_table[idx].wrapping_add((dif / 2) as u16);
+            let val = self.cal_table[idx].wrapping_add((dif / 2) as u16);
+            self.cal_table[idx] = val;
 
             // Every `el_angle_div` steps, we check if this is the minimal offset position.
             // If so, update the offset to the lowest encountered value.
             if (idx % self.el_angle_div) == 0 {
                 self.offset = self.offset.min(self.cal_table[idx]);
             }
-        } else {
-            // If the index is out of range, log a warning.
-            defmt::warn!("CAL TABLE: fill_second: Index {} out of bounds", idx);
+
+            if (idx + 1 == self.cal_size) {
+                self.max_deviation = val;
+                return true;
+            }
+            let diff = self.max_deviation.wrapping_sub(val) as i16;
+            self.max_deviation = val;
+            if diff >= 0 {
+                return true;
+            }
         }
+        // If the index is out of range, log a warning.
+        defmt::warn!("CAL TABLE: fill_second: Index {} out of bounds", idx);
+        return false;
     }
 
     /// Normalizes the calibration table by subtracting the offset so that zero aligns correctly.

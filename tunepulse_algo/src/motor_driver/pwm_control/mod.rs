@@ -17,13 +17,14 @@ pub enum PhasePattern {
     DCAB = 0b01001011, // Pattern 3: {3, 2, 0, 1}
 }
 
-#[derive(Debug, Clone, Copy)]
-// Enumeration for motor types
+// Enumeration for motor types with full steps amount per rotation
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u32)] // Ensures the enum is represented as a u16
 pub enum MotorType {
-    UNDEFINED, // No motor type selected
-    DC,        // Direct Current motor
-    STEPPER,   // Stepper motor
-    BLDC,      // Brushless DC motor
+    UNDEFINED = 1,        // No motor type selected
+    DC = u16::MAX as u32, // Direct Current motor - Crunch
+    BLDC = 3,             // Brushless DC motor
+    STEPPER = 4,          // Stepper motor
 }
 
 // Class to handle different types of motor controls
@@ -37,7 +38,7 @@ impl MotorPWM {
     pub fn new(motor: MotorType, connection: PhasePattern) -> Self {
         MotorPWM {
             motor_sel: MotorSelector::new(motor),
-            phase_sel: PhaseSelector::new(connection as u8),
+            phase_sel: PhaseSelector::new(connection),
         }
     }
 
@@ -49,7 +50,7 @@ impl MotorPWM {
         self.phase_sel.tick(motor_pwm)
     }
 
-    pub fn tick_angle(&mut self, voltg_ang: (i16, i16)) -> [i16; 4]  {
+    pub fn tick_angle(&mut self, voltg_ang: (i16, i16)) -> [i16; 4] {
         let voltage_ab = math::angle2sincos(voltg_ang.0);
         let voltage_ab_scaled = math::scale_sincos(voltage_ab, voltg_ang.1);
         self.tick(voltage_ab_scaled)

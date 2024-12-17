@@ -59,7 +59,7 @@ pub struct AngleCalibrator {
     dif_max: i32,  // Maximum difference in step measurement for consistency checks
     dif_min: i32,  // Minimum difference in step measurement for consistency checks
 
-    cal_table: CalibrationTable,
+    cal_table: CalibrationTable::<200>,
     el_step_idx: u16
 }
 

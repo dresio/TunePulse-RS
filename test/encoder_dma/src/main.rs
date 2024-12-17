@@ -10,7 +10,7 @@ use hal::dma::{Dma, DmaChannel, DmaInput, DmaPeriph};
 use hal::timer::{Timer, TimerInterrupt};
 use hal::{self, clocks::Clocks, pac, pac::TIM3};
 
-use tunepulse_algo::encoder_position::EncoderPosition;
+use tunepulse_algo::math_integer::motion::position_integrator::Position;
 use tunepulse_drivers::encoder_spi;
 
 static mut SPI_READ_BUF: [u8; 4] = [0x00, 0x00, 0x00, 0x00];
@@ -29,7 +29,7 @@ mod app {
     struct Local {
         timer: Timer<TIM3>,
 
-        encoder: EncoderPosition,
+        encoder: Position,
     }
 
     #[init]
@@ -48,8 +48,7 @@ mod app {
         dma::mux(DmaPeriph::Dma1, DmaChannel::C3, DmaInput::Spi1Tx);
         dma::mux(DmaPeriph::Dma1, DmaChannel::C2, DmaInput::Spi1Rx);
 
-        let mut encoder = EncoderPosition::new(freq);
-        encoder.set_alpha(220);
+        let mut encoder = Position::new();
 
         let mut timer = Timer::new_tim3(dp.TIM3, freq as f32, Default::default(), &clock_cfg);
         timer.enable_interrupt(TimerInterrupt::Update);
