@@ -43,10 +43,11 @@ impl SupplyVoltage {
     /// Updates the voltage measurement by processing the filter and scaling the output.
     ///
     /// This function should be called periodically to refresh the voltage measurement.
-    pub fn tick(&mut self, vsup_adc: u16) {
+    pub fn tick(&mut self, vsup_adc: u16) -> &Self{
         self.filter.tick(vsup_adc);  // Advance the filter state.
         self.voltage_norm = (self.filter.get_output() as u16 >> 1) as i16;  // Retrieve and normalize the filter output.
         self.voltage_mv = norm_to_value(self.voltage_norm, self.max_voltage_mv);  // Convert normalized voltage to millivolts.
+        self
     }
 
     /// Retrieves the normalized voltage value.

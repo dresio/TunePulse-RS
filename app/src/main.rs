@@ -35,7 +35,6 @@ mod app {
 
     // Import custom modules from tunepulse_rs crate
     use tunepulse_algo::{
-        analog::supply_voltage::SupplyVoltage,
         MotorDriver,
         motor_driver::pwm_control::{MotorType, PhasePattern}
     };
@@ -52,10 +51,8 @@ mod app {
     struct Local {
         timer_pwm: pwm::TimPWM,
         underflow: bool,
-        tick_counter: i16,
         motor: MotorDriver,
         dma1: Dma<DMA1>,
-        supply: SupplyVoltage,
     }
 
     #[init]
@@ -71,10 +68,9 @@ mod app {
 
         let mut timer_pwm = pwm::TimPWM::new(dp.TIM2, &clock_cfg, freq);
         timer_pwm.begin();
+        const MAX_SUP_VLTG: i32 = 69000;
+        let motor = MotorDriver::new(MotorType::STEPPER, PhasePattern::ABCD, freq, MAX_SUP_VLTG);
 
-        let motor = MotorDriver::new(MotorType::STEPPER, PhasePattern::ABCD, freq);
-
-        let supply = SupplyVoltage::new(200, 69000);
 
         let spi1 = encoder_spi::Spi1DMA::new(dp.SPI1);
 
@@ -106,10 +102,8 @@ mod app {
             Local {
                 timer_pwm,
                 underflow: true,
-                tick_counter: 0,
                 motor,
                 dma1,
-                supply,
             },
         )
     }
@@ -122,7 +116,7 @@ mod app {
         dr_en.set_high();
     }
 
-    #[task(binds = TIM2, shared = [spi1, adc1], local = [timer_pwm, underflow, tick_counter, motor, supply])]
+    #[task(binds = TIM2, shared = [spi1, adc1], local = [timer_pwm, underflow, motor])]
     fn tim2_period_elapsed(mut cx: tim2_period_elapsed::Context) {
         // Clear the update interrupt flag
         cx.local
@@ -139,22 +133,15 @@ mod app {
             // *cx.local.tick_counter = cx.local.tick_counter.wrapping_add(2);
             // Set the PWM duties on the timer
             cx.local.timer_pwm.apply_pwm(cx.local.motor.get_pwm());
+            let adc_sup_voltage = unsafe { ADC_READ_BUF[2] >> 1 };
 
-            cx.local.supply.tick(unsafe { ADC_READ_BUF[2] >> 1 });
-
-            // Start next iter calculations
-            let speed = 25;
             let voltage = 1000;
 
-            let duty = (voltage << 15) / (cx.local.supply.voltage_mv() + 1);
-            let pwm = if duty > i16::MAX as i32 {i16::MAX} else {duty as i16};
-            // let mut duty = 0.2;
-            // let counter = *cx.local.tick_counter;
             // Get encoder angle
-            let res: u16 = cx.shared.spi1.lock(|spi1| spi1.get_angle());
+            let pos: u16 = cx.shared.spi1.lock(|spi1| spi1.get_angle());
 
             // Calculate pwm states
-            cx.local.motor.tick((speed, pwm), res);
+            cx.local.motor.tick(voltage, pos, adc_sup_voltage);
         } else {
             // Start ADC DMA reading
             cx.shared.adc1.lock(|adc| {
