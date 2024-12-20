@@ -1,76 +1,70 @@
-use super::lpf::FilterLPF;
+// Implements the SupplyVoltage module, managing and filtering supply voltage measurements
+// for accurate and stable voltage monitoring in the system.
 
-use super::norm_to_value;
+// Key Features:
+// - Processes raw supply voltage readings from ADC
+// - Applies a low-pass filter to smooth voltage data
+// - Scales filtered output to obtain voltage in millivolts
+// - Provides access to normalized and scaled voltage values
 
+// Detailed Operation:
+// The SupplyVoltage struct handles raw ADC readings by passing them through a low-pass filter
+// to eliminate noise and smooth the voltage signal. The filtered output is then normalized
+// and scaled based on the maximum expected voltage to provide accurate millivolt measurements.
+// This setup ensures reliable voltage monitoring for the system.
 
-/// @file supply_voltage.rs
-/// @brief Provides the `SupplyVoltage` struct for managing and filtering supply voltage measurements.
-///
-/// This module defines the `SupplyVoltage` struct, which handles raw supply voltage readings,
-/// applies a low-pass filter to smooth the data, and scales the filtered output to obtain
-/// the voltage in millivolts.
+// Licensed under the Apache License, Version 2.0
+// Copyright 2024 Anton Khrustalev, creapunk.com
 
-/// Manages supply voltage measurements with low-pass filtering.
-///
-/// This struct processes raw supply voltage readings, applies a low-pass filter to smooth the data,
-/// and scales the filtered output to obtain the voltage in millivolts.
-///
-/// # Parameters
-/// - `MAX_VOLTAGE_MV`: The maximum expected supply voltage in millivolts.
+use super::lpf::FilterLPF; // Imports the low-pass filter implementation from the parent module
+use super::norm_to_value; // Imports the normalization to value conversion function from the parent module
+
+/// Manages supply voltage measurements with low-pass filtering
 pub struct SupplyVoltage {
-    filter: FilterLPF,  // Instance of low-pass filter for smoothing voltage measurements.
-    max_voltage_mv: i32,  // Maximum voltage in millivolts for scaling.
-    voltage_norm: i16,  // Current normalized voltage value.
-    voltage_mv: i32,  // Current voltage measurement in millivolts.
+    /// Instance of low-pass filter for smoothing voltage measurements
+    filter: FilterLPF,
+
+    /// Maximum voltage in millivolts for scaling
+    max_voltage_mv: i32,
+
+    /// Current normalized voltage value
+    voltage_norm: i16,
+
+    /// Current voltage measurement in millivolts
+    voltage_mv: i32,
 }
 
 impl SupplyVoltage {
-    /// Constructs a `SupplyVoltage` object with the specified raw voltage and filter constant.
-    ///
-    /// # Parameters
-    /// - `vsup_raw`: The raw supply voltage reading from ADC [supposed 16-bit for positive range].
-    /// - `k_filter`: The filter constant for the low-pass filter.
-    /// - `max_sup_voltage`: The maximum supply voltage in millivolts.
+    /// Constructs a `SupplyVoltage` object with the specified filter constant and maximum voltage
     pub fn new(k_filter: u8, max_sup_voltage: i32) -> Self {
         SupplyVoltage {
-            max_voltage_mv: max_sup_voltage,
-            filter: FilterLPF::new(0, k_filter),  // Initialize the filter with raw voltage and filter constant.
-            voltage_norm: 0,
-            voltage_mv: 0,
+            max_voltage_mv: max_sup_voltage, // Sets the maximum supply voltage
+            filter: FilterLPF::new(0, k_filter), // Initializes the low-pass filter with initial value and filter constant
+            voltage_norm: 0,                     // Initializes the normalized voltage to zero
+            voltage_mv: 0,                       // Initializes the millivolt voltage to zero
         }
     }
 
-    /// Updates the voltage measurement by processing the filter and scaling the output.
-    ///
-    /// This function should be called periodically to refresh the voltage measurement.
-    pub fn tick(&mut self, vsup_adc: u16) -> &Self{
-        self.filter.tick(vsup_adc);  // Advance the filter state.
-        self.voltage_norm = (self.filter.get_output() as u16 >> 1) as i16;  // Retrieve and normalize the filter output.
-        self.voltage_mv = norm_to_value(self.voltage_norm, self.max_voltage_mv);  // Convert normalized voltage to millivolts.
+    /// Updates the voltage measurement by processing the filter and scaling the output
+    pub fn tick(&mut self, vsup_adc: u16) -> &Self {
+        self.filter.tick(vsup_adc); // Advances the filter state with the new ADC reading
+        self.voltage_norm = (self.filter.get_output() >> 1) as i16; // Retrieves and normalizes the filter output
+        self.voltage_mv = norm_to_value(self.voltage_norm, self.max_voltage_mv); // Converts normalized voltage to millivolts
         self
     }
 
-    /// Retrieves the normalized voltage value.
-    ///
-    /// # Returns
-    /// A reference to the normalized voltage.
+    /// Retrieves the normalized voltage value
     pub fn voltage_norm(&self) -> i16 {
-        self.voltage_norm
+        self.voltage_norm // Returns the current normalized voltage
     }
 
-    /// Retrieves the voltage in millivolts.
-    ///
-    /// # Returns
-    /// The voltage in millivolts.
+    /// Retrieves the voltage in millivolts
     pub fn voltage_mv(&self) -> i32 {
-        self.voltage_mv
+        self.voltage_mv // Returns the current voltage measurement in millivolts
     }
 
-    /// Retrieves the maximum voltage in millivolts.
-    ///
-    /// # Returns
-    /// The maximum voltage in millivolts.
+    /// Retrieves the maximum voltage in millivolts
     pub fn max_voltage_mv(&self) -> i32 {
-        self.max_voltage_mv
+        self.max_voltage_mv // Returns the maximum supply voltage in millivolts
     }
 }

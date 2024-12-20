@@ -35,8 +35,8 @@ mod app {
 
     // Import custom modules from tunepulse_rs crate
     use tunepulse_algo::{
-        MotorDriver,
-        motor_driver::pwm_control::{MotorType, PhasePattern}
+        MotorController,
+        motor_driver::{MotorType, PhasePattern, ControlMode}
     };
 
     use tunepulse_drivers::*;
@@ -51,7 +51,7 @@ mod app {
     struct Local {
         timer_pwm: pwm::TimPWM,
         underflow: bool,
-        motor: MotorDriver,
+        motor: MotorController,
         dma1: Dma<DMA1>,
     }
 
@@ -69,7 +69,7 @@ mod app {
         let mut timer_pwm = pwm::TimPWM::new(dp.TIM2, &clock_cfg, freq);
         timer_pwm.begin();
         const MAX_SUP_VLTG: i32 = 69000;
-        let motor = MotorDriver::new(MotorType::STEPPER, PhasePattern::ABCD, freq, MAX_SUP_VLTG);
+        let motor = MotorController::new(MotorType::STEP, PhasePattern::ABCD, freq, MAX_SUP_VLTG);
 
 
         let spi1 = encoder_spi::Spi1DMA::new(dp.SPI1);

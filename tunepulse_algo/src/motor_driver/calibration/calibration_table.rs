@@ -1,54 +1,65 @@
+// Implements the motor calibration module, handling calibration data collection,
+// normalization, and position correction for the motor control system.
 
+// Key Features:
+// - Collects and stores encoder data during motor rotation for calibration.
+// - Removes hysteresis effects through bidirectional data collection.
+// - Determines calibration offset and start index based on minimal deviation.
+// - Validates calibration data for consistency and accuracy.
+// - Corrects motor position readings using the calibrated data.
+
+// Detailed Operation:
+// The calibration module divides a full motor rotation into a fixed number of electrical
+// angle segments. It records actual encoder positions for each theoretical angle, performing
+// forward and backward passes to eliminate hysteresis. The module identifies the minimum
+// deviation point to establish an offset and start index, then normalizes the calibration
+// data to ensure a smooth linear progression. It validates the calibration by checking
+// deviations against the average step size and corrects motor positions using interpolated
+// values from the calibration table.
+
+// Licensed under the Apache License, Version 2.0
+// Copyright 2024 Anton Khrustalev, creapunk.com
 
 use defmt_rtt as _; // Use the defmt_rtt crate for logging via RTT (Real-Time Transfer)
 
 /// The main driver struct for the motor, holding all the state required for operation and calibration.
 pub struct CalibrationTable<const N: usize> {
-    // state: CalibrationState,
-    /// Stores sampled encoder data across a full calibration cycle
+    // state: CalibrationState, // Calibration state management (currently commented out)
+    /// Stores sampled encoder data across a full calibration cycle.
     cal_table: [u16; N],
-    /// Current number of valid points collected during calibration
+
+    /// Current number of valid points collected during calibration.
     cal_size: usize,
-    /// Divider representing how many steps form one electrical period
+
+    /// Divider representing how many steps form one electrical period.
     el_angle_div: usize,
-    /// Index of the first zero-position value after normalization
+
+    /// Index of the first zero-position value after normalization.
     offst_idx: usize,
-    /// Offset to align calibration data such that "zero" aligns to the correct mechanical angle
+
+    /// Offset to align calibration data such that "zero" aligns to the correct mechanical angle.
     offst_val: u16,
-    /// Maximum absolute deviation between ideal and actual calibration values
+
+    /// Maximum absolute deviation between ideal and actual calibration values.
     max_deviation: u16,
+
+    /// Temporary index used during calibration data collection.
     temp_idx: usize,
 }
 
 // Constants and methods used during calibration
 impl<const N: usize> CalibrationTable<N> {
-    /// ## Principle of Operation:
-    /// - A full rotation, represented as a u16 value, is divided evenly into a fixed number of poles.
-    /// - Each pole corresponds to a certain electrical angle segment.
-    /// - The calibration table records actual measured positions for each theoretical angle.
-    /// - By filling the table forward and backward (to remove hysteresis), then finding a minimal point
-    ///   aligned with zero electrical angle, we establish an offset and a starting index.
-    /// - After normalization (subtracting offset), the table ideally forms a smooth linear progression.
-    ///
-    /// Steps performed during calibration:
-    /// 1. Allocate an array large enough to hold calibration samples for a full rotation.
-    /// 2. Fill the table as we rotate the motor to sample positions at defined intervals.
-    /// 3. Perform a second pass in the opposite direction to remove hysteresis effects.
-    /// 4. Identify the minimum point where `el_angle == 0`, determining offset and start index.
-    /// 5. Normalize the table by subtracting the offset, aligning the data so that zero angle aligns properly.
-    /// 6. Calculate and record maximum deviations to assess calibration quality.
-
     /// Creates a new `CalibrationTable` with default values.
     pub fn new() -> Self {
         Self {
-            // state: CalibrationState::Reset,
+            // state: CalibrationState::Reset, // Initialize calibration state to Reset
             offst_val: 0, // Default offset is 0 until calibration determines otherwise
             offst_idx: 0, // Default start index is 0
             cal_size: 0,  // Initially, no calibration points are filled
             cal_table: [0; N], // The calibration data array, all initialized to zero
             el_angle_div: 1, // Default electrical angle divider is 1 (no division)
             max_deviation: 0, // Initially, no deviation is recorded
-            temp_idx: 0,
+            temp_idx: 0,  // Initialize temporary index to 0
         }
     }
 
@@ -59,63 +70,68 @@ impl<const N: usize> CalibrationTable<N> {
         self.el_angle_div = el_angle_div as usize; // Convert el_angle_div to usize for indexing
         self.cal_size = 0; // Clear the size (no valid data points yet)
         self.offst_val = u16::MAX; // Initialize offset to max, so we can find the minimum value later
-        self.max_deviation = 0;
-        self.temp_idx = 0;
+        self.max_deviation = 0; // Reset maximum deviation
+        self.temp_idx = 0; // Reset temporary index
     }
 
     /// Stores the first round of calibration data at the given index.
     /// This collects raw samples as the motor is rotated in one direction.
     pub fn fill_first(&mut self, idx: usize, val: u16) -> bool {
-        // Each next index should be +1 to prevoius and should not go out limit
-        if idx < N && idx.wrapping_sub(self.temp_idx) <= 1  {
-            self.temp_idx = idx;
+        // Check if the index is within bounds and sequential
+        if idx < N && idx.wrapping_sub(self.temp_idx) <= 1 {
+            self.temp_idx = idx; // Update temporary index
             self.cal_table[idx] = val; // Store the sample value
-            self.cal_size = self.cal_size.max(idx + 1); // Update cal_size to ensure it reflects the maximum filled index
-            return true;
+            self.cal_size = self.cal_size.max(idx + 1); // Update cal_size to reflect the maximum filled index
+            return true; // Indicate successful storage
         }
-        // self.state = CalibrationState::Error;
+        // Log a warning if the index is out of bounds or not sequential
         defmt::warn!("CAL TABLE: fill_first: Index got error {}", idx);
-        return false;
+        return false; // Indicate failure
     }
 
     /// Performs a second pass of filling data in the opposite direction to remove hysteresis.
     /// This method averages the forward and backward measurements to center the hysteresis loop.
     pub fn fill_second(&mut self, idx: usize, val: u16) -> bool {
-        // Each next index should not go out limit
-        if idx < N {     
+        // Check if the index is within bounds
+        if idx < N {
             // Calculate the signed difference to handle potential wraparound (values near 0 or max range).
             let dif = val.wrapping_sub(self.cal_table[idx]) as i16;
 
             // Update the table with the midpoint of the hysteresis range.
             let val = self.cal_table[idx].wrapping_add((dif / 2) as u16);
-            self.cal_table[idx] = val;
+            self.cal_table[idx] = val; // Store the averaged value
 
-            // Every `el_angle_div` steps, we check if this is the minimal offset position.
-            // If so, update the offset to the lowest encountered value.
+            // Every `el_angle_div` steps, check if this is the minimal offset position.
             if ((idx % self.el_angle_div) == 0) && (val <= self.offst_val) {
-                self.offst_val = val;
-                self.offst_idx = idx;
+                self.offst_val = val; // Update offset to the lowest encountered value
+                self.offst_idx = idx; // Update start index
             }
 
+            // If the current index is the last filled index, record the max deviation
             if (idx + 1 == self.cal_size) {
-                self.max_deviation = val;
-                return true;
+                self.max_deviation = val; // Update maximum deviation
+                return true; // Indicate successful completion
             }
+
+            // Calculate the difference between current max deviation and the new value
             let diff = self.max_deviation.wrapping_sub(val) as i16;
-            self.max_deviation = val;
+            self.max_deviation = val; // Update max deviation to the new value
+
+            // If the deviation exceeds the threshold, indicate successful completion
             if diff > 10 {
                 return true;
             }
         }
-        defmt::warn!("CAL TABLE: fill_first: Index got error {}", idx);
-        return false;
+        // Log a warning if the index is out of bounds
+        defmt::warn!("CAL TABLE: fill_second: Index got error {}", idx);
+        return false; // Indicate failure
     }
 
     /// Retrieves a calibration value by an index relative to the `start_idx`.
     /// The resulting index is wrapped around `cal_size` to handle modulo arithmetic over a circular table.
     #[inline(always)]
     pub fn get_val_by_idx(&self, index: usize) -> u16 {
-        let actual_idx = (self.offst_idx + index) % self.cal_size;
+        let actual_idx = (self.offst_idx + index) % self.cal_size; // Compute the actual index
         self.cal_table[actual_idx] // Return the table value at the computed position
     }
 
@@ -124,88 +140,85 @@ impl<const N: usize> CalibrationTable<N> {
     /// deviations from the ideal linear distribution are acceptable.
     /// # TODO: make it without for loop
     pub fn check(&mut self) -> bool {
-        // Check if the total number of samples divides evenly by `el_angle_div`.
-
+        // Calculate the average step size based on the total range and number of samples
         let avg_step = u16::MAX / self.cal_size as u16;
         self.max_deviation = 0; // Reset the maximum deviation counter
+
+        // Iterate through each calibration point to compute deviations
         for i in 0..self.cal_size {
             let val = self.cal_table[i].wrapping_sub(self.offst_val); // Shift values so offset becomes zero
-            let corrected_idx = ((self.cal_size + i) - self.offst_idx) % self.cal_size;
-            let deviation = abs_deviation(val, corrected_idx, self.cal_size);
+            let corrected_idx = ((self.cal_size + i) - self.offst_idx) % self.cal_size; // Compute corrected index
+            let deviation = abs_deviation(val, corrected_idx, self.cal_size); // Calculate deviation
 
-            self.cal_table[i] = val;
-            self.max_deviation = self.max_deviation.max(deviation);
+            self.cal_table[i] = val; // Update calibration table with normalized value
+            self.max_deviation = self.max_deviation.max(deviation); // Update maximum deviation if necessary
 
+            // Check if the deviation exceeds the average step size
             if deviation >= avg_step {
                 defmt::error!(
                     "Step deviation too high [Avg step: {}; Max deviation: {}]",
                     avg_step,
                     self.max_deviation
                 );
-                return false;
+                return false; // Indicate validation failure
             }
         }
+
+        // Log successful calibration validation
         defmt::info!(
-            "CAL TABLE: Success! Ofset val: {}; Offset idx: {}, Max deviation: {};",
+            "CAL TABLE: Success! Offset val: {}; Offset idx: {}, Max deviation: {};",
             self.offst_val,
             self.offst_idx,
             self.max_deviation
         );
-        return true;
+        return true; // Indicate validation success
     }
 
     /// Corrects a given position using the calibration table.
     /// Given an actual encoder `position`, it accounts for the offset and searches near the expected index.
     /// Uses a small loop to find the segment where real_pos transitions from positive to negative difference,
     /// then interpolates the ideal position to achieve a corrected angle.
-    ///
-    /// Returns:
-    /// (corrected_angle, mech_el_angle):
-    /// - `corrected_angle` is the position adjusted by the calibration table offset.
-    /// - `mech_el_angle` is the mechanical angle mapped into an electrical period.
     pub fn correct_pos(&self, position: u16) -> (u16, u16) {
         // Align the position so that zero aligns with the table's zero-offset point.
         let real_pos = position.wrapping_sub(self.offst_val);
 
         // Estimate a starting index by scaling `real_pos` down.
-        // The bit-shift by 16 approximates a division by 65536,
-        // since `cal_size` and values are in `u16` range.
         let mut idx = (real_pos.wrapping_sub(self.max_deviation) as usize * self.cal_size) >> 16;
 
         let mut result: u16 = u16::MAX; // Initialize result to max as a fallback
 
         // Starting comparison points
-        let mut cal_pos1 = self.get_val_by_idx(idx);
-        let mut idl_pos1 = get_ideal(idx, self.cal_size);
+        let mut cal_pos1 = self.get_val_by_idx(idx); // Retrieve calibration value at current index
+        let mut idl_pos1 = get_ideal(idx, self.cal_size); // Retrieve ideal value at current index
 
         // Iterate up to 8 steps to find where we cross from positive diff to negative diff.
         for _ in 0..8 {
-            idx = (idx + 1) % self.cal_size;
-            let cal_pos2 = self.get_val_by_idx(idx);
-            let idl_pos2 = get_ideal(idx, self.cal_size);
+            idx = (idx + 1) % self.cal_size; // Move to the next index
+            let cal_pos2 = self.get_val_by_idx(idx); // Retrieve calibration value at new index
+            let idl_pos2 = get_ideal(idx, self.cal_size); // Retrieve ideal value at new index
 
-            let diff1 = real_pos.wrapping_sub(cal_pos1) as i16;
-            let diff2 = real_pos.wrapping_sub(cal_pos2) as i16;
+            let diff1 = real_pos.wrapping_sub(cal_pos1) as i16; // Difference at previous index
+            let diff2 = real_pos.wrapping_sub(cal_pos2) as i16; // Difference at current index
 
             // Once we find a boundary where diff changes sign (diff1 >= 0, diff2 < 0),
             // we interpolate the exact ideal position within that segment.
             if (diff1 >= 0) && (diff2 < 0) {
-                result = interpolate(cal_pos1, idl_pos1, cal_pos2, idl_pos2, real_pos);
-                break;
+                result = interpolate(cal_pos1, idl_pos1, cal_pos2, idl_pos2, real_pos); // Perform interpolation
+                break; // Exit the loop after interpolation
             }
 
             // Move to the next segment
-            cal_pos1 = cal_pos2;
-            idl_pos1 = idl_pos2;
+            cal_pos1 = cal_pos2; // Update previous calibration position
+            idl_pos1 = idl_pos2; // Update previous ideal position
         }
 
         // Re-apply offset to return the corrected angle to the global coordinate system.
-        let corrected_angle = result.wrapping_add(self.offst_val);
+        let corrected_angle = result.wrapping_add(self.offst_val); // Adjust corrected angle with offset
 
         // Compute the mechanical angle mapped into one electrical period.
-        let mech_el_angle = ((result as usize * self.cal_size) / self.el_angle_div) as u16;
+        let mech_el_angle = ((result as usize * self.cal_size) / self.el_angle_div) as u16; // Calculate mechanical to electrical angle
 
-        (corrected_angle, mech_el_angle)
+        (corrected_angle, mech_el_angle) // Return the corrected angles
     }
 }
 
@@ -214,7 +227,7 @@ impl<const N: usize> CalibrationTable<N> {
 #[inline(always)]
 fn get_ideal(i: usize, range: usize) -> u16 {
     const CAL_VAL_RANGE: usize = u16::MAX as usize; // Range of `u16` values (0 to 65535)
-    ((CAL_VAL_RANGE * i) / range) as u16
+    ((CAL_VAL_RANGE * i) / range) as u16 // Calculate ideal value based on linear progression
 }
 
 /// Calculates the maximum absolute deviation from the ideal linear progression.
@@ -228,7 +241,7 @@ fn abs_deviation(val: u16, idx: usize, size: usize) -> u16 {
     // Compute the deviation as the absolute difference from the measured value.
     let deviation = ((ideal as u16).wrapping_sub(val) as i16).abs() as u16;
 
-    deviation
+    deviation // Return the calculated deviation
 }
 
 /// Interpolates a position `c1` within a reference segment defined by points (a1, a2) and (b1, b2).
