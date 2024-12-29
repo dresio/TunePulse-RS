@@ -41,11 +41,22 @@ pub struct DataInputs {
     pub angle_raw: u16,
 }
 
+impl DataInputs {
+    pub const fn default() -> Self {
+        Self {
+            supply_adc: 0,
+            temper_adc: 0,
+            currnt_adc: [0; 4],
+            angle_raw: 0,
+        }
+    }
+}
+
 /// Enum defining bit masks for each data field and a lock bit.
 /// Each variant represents a specific field in the `DataInputs` struct.
 /// The `LOCK` variant is used to prevent modifications during data reads.
 #[repr(u32)]
-enum FieldBit {
+pub enum DataInputsBit {
     /// Mask for the supply ADC field bit.
     SUPPLY = 1 << 0,
 
@@ -62,11 +73,6 @@ enum FieldBit {
     LOCK = 1 << 31,
 }
 
-/// Combine all field bits using inverted logic to represent a fully unfilled (all fields pending) state.
-const MANDATORY: u32 = FieldBit::SUPPLY as u32
-    | FieldBit::TEMP as u32
-    | FieldBit::CURRENT as u32
-    | FieldBit::ANGLE as u32;
 
 /// Structure for managing two buffers of `DataInputs` and related flags.
 /// Utilizes double-buffering to ensure data consistency and minimize synchronization overhead.
@@ -89,7 +95,7 @@ pub struct InputsDump<const MANDATORY_FIELDS: u32> {
 
 impl<const MANDATORY_FIELDS: u32> InputsDump<MANDATORY_FIELDS> {
     /// Creates a new `InputsDump` with both buffers cleared and ready to be filled.
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
             buffers: [DataInputs::default(), DataInputs::default()], // Initialize both buffers to default
             idx2update: 0,                                           // Start updating buffer 0
@@ -113,7 +119,7 @@ impl<const MANDATORY_FIELDS: u32> InputsDump<MANDATORY_FIELDS> {
 
     /// Clears a particular field bit in the flags for the specified buffer.
     #[inline(always)]
-    fn clear_field_bit(&mut self, idx: usize, bit: FieldBit) {
+    fn clear_field_bit(&mut self, idx: usize, bit: DataInputsBit) {
         self.flags[idx] &= !(bit as u32); // Use NOT mask to clear the bit
     }
 
@@ -134,7 +140,7 @@ impl<const MANDATORY_FIELDS: u32> InputsDump<MANDATORY_FIELDS> {
     pub fn set_supply_adc(&mut self, value: u16) {
         let idx = self.idx2update; // Get the currently updating buffer index
         self.buffers[idx].supply_adc = value; // Store the supply ADC value
-        self.clear_field_bit(idx, FieldBit::SUPPLY); // Mark the supply field as filled
+        self.clear_field_bit(idx, DataInputsBit::SUPPLY); // Mark the supply field as filled
         self.check_fill(idx); // Check if buffer filling is complete or if we need to switch
     }
 
@@ -142,7 +148,7 @@ impl<const MANDATORY_FIELDS: u32> InputsDump<MANDATORY_FIELDS> {
     pub fn set_temper_adc(&mut self, value: u16) {
         let idx = self.idx2update; // Get the currently updating buffer index
         self.buffers[idx].temper_adc = value; // Store the temperature ADC value
-        self.clear_field_bit(idx, FieldBit::TEMP); // Mark the temperature field as filled
+        self.clear_field_bit(idx, DataInputsBit::TEMP); // Mark the temperature field as filled
         self.check_fill(idx); // Check if buffer filling is complete or if we need to switch
     }
 
@@ -150,7 +156,7 @@ impl<const MANDATORY_FIELDS: u32> InputsDump<MANDATORY_FIELDS> {
     pub fn set_current_adc(&mut self, values: [u16; 4]) {
         let idx = self.idx2update; // Get the currently updating buffer index
         self.buffers[idx].currnt_adc = values; // Store the current ADC array
-        self.clear_field_bit(idx, FieldBit::CURRENT); // Mark the current field as filled
+        self.clear_field_bit(idx, DataInputsBit::CURRENT); // Mark the current field as filled
         self.check_fill(idx); // Check if buffer filling is complete or if we need to switch
     }
 
@@ -158,7 +164,7 @@ impl<const MANDATORY_FIELDS: u32> InputsDump<MANDATORY_FIELDS> {
     pub fn set_angle_raw(&mut self, value: u16) {
         let idx = self.idx2update; // Get the currently updating buffer index
         self.buffers[idx].angle_raw = value; // Store the angle data
-        self.clear_field_bit(idx, FieldBit::ANGLE); // Mark the angle field as filled
+        self.clear_field_bit(idx, DataInputsBit::ANGLE); // Mark the angle field as filled
         self.check_fill(idx); // Check if buffer filling is complete or if we need to switch
     }
 
@@ -173,10 +179,10 @@ impl<const MANDATORY_FIELDS: u32> InputsDump<MANDATORY_FIELDS> {
     #[inline(always)]
     pub fn get_data(&mut self) -> DataInputs {
         let ready_idx = self.get_opposite(self.idx2update); // Get the opposite buffer which should be ready
-        self.flags[ready_idx] |= FieldBit::LOCK as u32; // Set the lock bit on the ready buffer
+        self.flags[ready_idx] |= DataInputsBit::LOCK as u32; // Set the lock bit on the ready buffer
         let data = self.buffers[ready_idx]; // Copy the data from the locked buffer
         self.prev_iter = self.iter; // Update the previous iteration counter
-        self.flags[ready_idx] &= !(FieldBit::LOCK as u32); // Clear the lock bit after reading
+        self.flags[ready_idx] &= !(DataInputsBit::LOCK as u32); // Clear the lock bit after reading
         data // Return the copied data
     }
 }

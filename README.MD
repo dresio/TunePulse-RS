@@ -77,12 +77,22 @@ If you want to use the RTT plotter, you can find it in the `tools/plotter` direc
 
 ---
 
+## Key Principles of Firmware Development
+
+1. **Non-blocking Operation**: Avoid the use of `delay` and other blocking functions to ensure maximum performance for secondary systems.
+2. **Interrupt-driven Telemetry Updates**: System telemetry is updated at fixed periodic intervals using interrupts, reducing the need for frequent checks and ensuring predictable, high-speed operation.
+3. **Data Normalization**: Normalize data wherever possible to minimize the need for additional checks.
+4. **Integer/Fixed-point Arithmetic**: Use integer or fixed-point mathematics wherever feasible, avoiding significant overhead, to maintain high performance across all controllers.
+5. **Optimized Computations**: Minimize type conversions and optimize calculations for efficiency.
+6. **Modular Design**: Divide the system into fundamental functional blocks whenever possible for better maintainability.
+7. **Separation of Concerns**: Keep mathematical operations, algorithms, and hardware drivers in distinct parts of the codebase to enhance clarity and modularity.
+
 ## Progress
 
 ### Algorithms
 
 - ☑️ PID controller with a FeedForward component (integer and floating-point implementations)
-- ☑️ Integer-math LPF filter with a variant for handling zero-crossing transitions
+- ☑️ Integer-math LPF filter with handling zero-crossing transitions
 - ☑️ Encoder coordinate system with zero-crossing handling and full rotation counting
 - ☑️ Calculation of motor instantaneous speed using a circular buffer
 - ☑️ Normalization of ADC input channels relative to `vref`
@@ -97,7 +107,10 @@ If you want to use the RTT plotter, you can find it in the `tools/plotter` direc
 ### Calibration
 
 - ☑️ Pole count calculation
+- ☑️ Direction detection
+- ☑️ Linearity check
 - ☑️ Lookup calibration table
+
 
 ### Drivers
 

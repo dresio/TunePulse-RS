@@ -18,16 +18,18 @@
 // Licensed under the Apache License, Version 2.0
 // Copyright 2024 Anton Khrustalev, creapunk.com
 
-mod motor_selector; // Imports the motor_selector module
-mod phase_selector; // Imports the phase_selector module
+mod sel_motor; // Imports the motor_selector module
+mod sel_phase; // Imports the phase_selector module
+mod sel_current;
 
-use motor_selector::MotorSelector; // Imports the MotorSelector struct from motor_selector module
-use phase_selector::PhaseSelector; // Imports the PhaseSelector struct from phase_selector module
+use sel_motor::MotorSelector; // Imports the MotorSelector struct from motor_selector module
+use sel_phase::PhaseSelector; // Imports the PhaseSelector struct from phase_selector module
 
-use crate::math_integer::clarke_transform::inverse_clarke_transform; // Imports inverse_clarke_transform from clarke_transform module
-use crate::math_integer::trigonometry as math; // Imports trigonometry module as math
+use crate::math_integer::motor;
 
-use super::calibration::angle_calibrator::AngleCalibrator;
+use crate::math_integer::{normalization::value_to_norm, trigonometry as math}; // Imports trigonometry module as math
+
+
 use super::{ControlMode, DriverStatus, Motor, MotorDriver, MotorType, PhasePattern};
 
 pub struct DriverPWM {
@@ -42,8 +44,6 @@ pub struct DriverPWM {
 
     control_mode: ControlMode,
 
-    calibrator: AngleCalibrator,
-
     status: DriverStatus,
 
     // ####### Related to step-dir driver ########
@@ -56,29 +56,33 @@ pub struct DriverPWM {
     pub direction: isize,
 
     ch_1234: [i16; 4],
+
+    motor: Motor
 }
 
 impl DriverPWM {
     #[inline(always)]
-    fn normal_run(&mut self, voltage_ab: (i16, i16), supply: i16) -> (i16, i16) {
+    fn normal_run(&mut self, ab: (i16, i16), supply: i16) -> (i16, i16) {
         match self.control_mode {
             ControlMode::CurrentAB => {
-                let sincos_ab = math::angle2sincos(voltage_ab.0); // Converts angle to sine and cosine voltages
-                math::scale_sincos(sincos_ab, voltage_ab.1) // Scales sine and cosine voltages based on input
+                let sincos_ab = math::angle2sincos(ab.0); // Converts angle to sine and cosine voltages
+                let targ_voltage = (ab.1 as i32 * self.motor.resistance) / 1000; // ma * mOhm -> mV
+                let norm_targ_voltage = value_to_norm(targ_voltage, 69000);
+                let mut scale = ((norm_targ_voltage as i32) << 15) / supply as i32;
+                if scale > i16::MAX as i32 { scale = i16::MAX as i32};
+                let scale = scale as i16;
+                math::scale_sincos(sincos_ab, scale) // Scales sine and cosine voltages based on input
             }
-            ControlMode::VoltageAB => voltage_ab,
+            ControlMode::VoltageAB => ab,
         }
     }
 }
 
 impl MotorDriver for DriverPWM {
     fn new(motor: Motor, control_mode: ControlMode) -> DriverPWM {
-        // Create a calibrator (adjust if there is a different constructor)
-        let calibrator = AngleCalibrator::new(1);
-
         DriverPWM {
+            
             brake: 0,
-            calibrator,
             angle: 0,
             current: 0,
             direction: motor.direction,
@@ -87,19 +91,25 @@ impl MotorDriver for DriverPWM {
             motor_type: MotorSelector::new(motor.pole_type), // Initializes motor selector with motor type
             phase_sel: PhaseSelector::new(motor.connection), // Initializes phase selector with phase pattern
             ch_1234: [0; 4],
+            motor,
         }
     }
 
-    fn tick(&mut self, voltage_ab: (i16, i16), supply: i16, current: [u16; 4]) -> [i16; 4] {
+    fn tick_control(&mut self, ab_inpt: (i16, i16), supply: i16) -> [i16; 4] {
         let voltage_ab = match self.status {
-            DriverStatus::Ready => voltage_ab,
+            DriverStatus::Ready => ab_inpt,
             DriverStatus::Error => (0, 0),
             DriverStatus::Calibrating => (0, 0),
         };
         let voltage_ab = self.normal_run(voltage_ab, supply);
-        let motor_voltages = self.motor_type.tick(voltage_ab, supply);
+        let motor_voltages = self.motor_type.tick(voltage_ab);
         self.ch_1234 = self.phase_sel.tick(motor_voltages);
         self.ch_1234
+    }
+
+    fn tick_current(&mut self, currents: [i16; 4]) -> (i16, i16) {
+        let i_abcd = self.phase_sel.tick(currents);
+        (0, 0)
     }
 
     fn calibrate(&mut self) -> bool {
@@ -142,7 +152,7 @@ impl MotorDriver for DriverPWM {
         true
     }
 
-    fn get_output(&self) -> [i16; 4] {
+    fn get_control(&self) -> [i16; 4] {
         self.ch_1234
     }
 }

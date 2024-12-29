@@ -14,8 +14,6 @@ pub struct DriverPulse {
 
     control_mode: ControlMode,
 
-    calibrator: AngleCalibrator,
-
     status: DriverStatus,
 
     angle2pulse: Angle2Pulse,
@@ -34,9 +32,9 @@ pub struct DriverPulse {
 
 impl DriverPulse {
     #[inline(always)]
-    fn normal_run(&mut self, voltage_ab: (i16, i16), supply: i16) -> (i16, i16) {
+    fn mode_check(&mut self, ab: (i16, i16)) -> (i16, i16) {
         match self.control_mode {
-            ControlMode::CurrentAB => (0, 0),
+            ControlMode::CurrentAB => ab,
             ControlMode::VoltageAB => (0, 0),
         }
     }
@@ -44,11 +42,8 @@ impl DriverPulse {
 
 impl MotorDriver for DriverPulse {
     fn new(motor: Motor, control_mode: ControlMode) -> DriverPulse {
-        // Create a calibrator (adjust if there is a different constructor)
-        let calibrator = AngleCalibrator::new(1);
         DriverPulse {
             enable: 0,
-            calibrator,
             angle: 0,
             current: 0,
             direction: motor.direction,
@@ -60,21 +55,24 @@ impl MotorDriver for DriverPulse {
         }
     }
 
-    fn tick(&mut self, voltage_ab: (i16, i16), supply: i16, current: [u16; 4]) -> [i16; 4] {
+    fn tick_control(&mut self, ab_inpt: (i16, i16), supply: i16) -> [i16; 4] {
         let voltage_ab = match self.status {
-            DriverStatus::Ready => voltage_ab,
+            DriverStatus::Ready => ab_inpt,
             DriverStatus::Error => (0, 0),
             DriverStatus::Calibrating => (0, 0),
         };
-        let current_ab = self.normal_run(voltage_ab, supply);
+        let current_ab = self.mode_check(voltage_ab);
         let pulse = self.angle2pulse.tick(current_ab.0);
         self.ch_1234 = [self.enable, pulse.0 as i16, pulse.1 as i16, voltage_ab.1];
         self.ch_1234
     }
 
+    fn tick_current(&mut self, current: [i16; 4]) -> (i16, i16) {
+        (0, 0)
+    }
+
     fn calibrate(&mut self) -> bool {
         self.status = DriverStatus::Calibrating;
-        // self.calibrator.calibrate()
         false
     }
 
@@ -107,7 +105,7 @@ impl MotorDriver for DriverPulse {
         self.control_mode == mode
     }
 
-    fn get_output(&self) -> [i16; 4] {
+    fn get_control(&self) -> [i16; 4] {
         self.ch_1234
     }
 }

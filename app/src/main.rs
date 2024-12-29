@@ -15,7 +15,18 @@ use hal::{
     timer::TimerInterrupt,
 };
 
+// Import custom modules from tunepulse_rs crate
+use tunepulse_algo::{
+    inputs_dump::{DataInputsBit, InputsDump},
+    motor_driver::{MotorType, PhasePattern},
+    MotorController,
+};
+
 use cortex_m;
+
+const MANDATORY_FIELDS: u32 = DataInputsBit::SUPPLY as u32 | DataInputsBit::ANGLE as u32;
+static mut TELEMETRY: InputsDump<MANDATORY_FIELDS> = InputsDump::new();
+static mut PWM: [i16; 4] = [0; 4];
 
 static mut SPI_READ_BUF: [u8; 4] = [0x00, 0x00, 0x00, 0x00];
 const SPI_WRITE_BUF: [u8; 4] = [0x80, 0x20, 0x00, 0x00];
@@ -29,22 +40,15 @@ const ADC1_SEQUENCE: [u8; SAMPLING_COUNT] = [I_CH1, I_CH2, VSENS];
 
 static mut ADC_READ_BUF: [u16; SAMPLING_COUNT] = [0; SAMPLING_COUNT];
 
-#[rtic::app(device = pac, peripherals = true)]
+#[rtic::app(device = pac, peripherals = true, dispatchers = [TIM7])]
 mod app {
     use super::*;
-
-    // Import custom modules from tunepulse_rs crate
-    use tunepulse_algo::{
-        MotorController,
-        motor_driver::{MotorType, PhasePattern, ControlMode}
-    };
 
     use tunepulse_drivers::*;
 
     #[shared]
     struct Shared {
         spi1: encoder_spi::Spi1DMA,
-        adc1: Adc<ADC1>,
     }
 
     #[local]
@@ -53,6 +57,7 @@ mod app {
         underflow: bool,
         motor: MotorController,
         dma1: Dma<DMA1>,
+        adc1: Adc<ADC1>,
     }
 
     #[init]
@@ -69,8 +74,14 @@ mod app {
         let mut timer_pwm = pwm::TimPWM::new(dp.TIM2, &clock_cfg, freq);
         timer_pwm.begin();
         const MAX_SUP_VLTG: i32 = 69000;
-        let motor = MotorController::new(MotorType::STEP, PhasePattern::ABCD, freq, MAX_SUP_VLTG);
-
+        const RESISTANE: i32 = 2000;
+        let motor = MotorController::new(
+            MotorType::STEP,
+            PhasePattern::ABCD,
+            freq,
+            MAX_SUP_VLTG,
+            RESISTANE,
+        );
 
         let spi1 = encoder_spi::Spi1DMA::new(dp.SPI1);
 
@@ -98,8 +109,9 @@ mod app {
         adc1.enable_interrupt(AdcInterrupt::EndOfSequence);
 
         (
-            Shared { spi1, adc1 },
+            Shared { spi1 },
             Local {
+                adc1,
                 timer_pwm,
                 underflow: true,
                 motor,
@@ -116,7 +128,7 @@ mod app {
         dr_en.set_high();
     }
 
-    #[task(binds = TIM2, shared = [spi1, adc1], local = [timer_pwm, underflow, motor])]
+    #[task(binds = TIM2, shared = [spi1], local = [timer_pwm, underflow, adc1])]
     fn tim2_period_elapsed(mut cx: tim2_period_elapsed::Context) {
         // Clear the update interrupt flag
         cx.local
@@ -129,39 +141,49 @@ mod app {
 
         // Alternate between PWM and encoder reading
         if *cx.local.underflow {
-            // Increment the tick counter, wrapping around on overflow
-            // *cx.local.tick_counter = cx.local.tick_counter.wrapping_add(2);
-            // Set the PWM duties on the timer
-            cx.local.timer_pwm.apply_pwm(cx.local.motor.get_pwm());
-            let adc_sup_voltage = unsafe { ADC_READ_BUF[2] >> 1 };
-
-            let voltage = 1000;
+            cx.local.timer_pwm.apply_pwm(unsafe { PWM });
+            let adc_sup_voltage = unsafe { ADC_READ_BUF[2] };
 
             // Get encoder angle
             let pos: u16 = cx.shared.spi1.lock(|spi1| spi1.get_angle());
+            unsafe { TELEMETRY.set_angle_raw(pos) };
+            unsafe { TELEMETRY.set_supply_adc(adc_sup_voltage) };
 
-            // Calculate pwm states
-            cx.local.motor.tick(voltage, pos, adc_sup_voltage);
+            // Instead of calling motor.tick() directly, spawn the new task:
+            unsafe {
+                if TELEMETRY.is_updated() == true {
+                    motor_tick_cmd::spawn().ok();
+                }
+            }
         } else {
             // Start ADC DMA reading
-            cx.shared.adc1.lock(|adc| {
-                unsafe {
-                    adc.read_dma(
-                        &mut ADC_READ_BUF,
-                        &ADC1_SEQUENCE,
-                        DmaChannel::C1,
-                        Default::default(),
-                        DmaPeriph::Dma1,
-                    )
-                };
-            });
+            unsafe {
+                cx.local.adc1.read_dma(
+                    &mut ADC_READ_BUF,
+                    &ADC1_SEQUENCE,
+                    DmaChannel::C1,
+                    Default::default(),
+                    DmaPeriph::Dma1,
+                )
+            };
 
             // Start SPI encoder read
             encoder_begin_read::spawn().expect("Failed to spawn encoder_begin_read");
         }
     }
 
-    #[task(priority = 0, shared = [spi1])]
+    // New task (command) with priority 1 that calls motor.tick():
+    #[task(priority = 1, local = [motor])]
+    async fn motor_tick_cmd(cx: motor_tick_cmd::Context) {
+        // Example control voltage
+        let current = 400;
+        // Safely retrieve TELEMETRY data and call motor.tick()
+        let data = unsafe { TELEMETRY.get_data() };
+        let pwm = cx.local.motor.tick(current, data);
+        unsafe { PWM = pwm };
+    }
+
+    #[task(priority = 1, shared = [spi1])]
     async fn encoder_begin_read(mut cx: encoder_begin_read::Context) {
         cx.shared.spi1.lock(|spi1| unsafe {
             spi1.start();
@@ -193,7 +215,7 @@ mod app {
         });
     }
 
-    #[task(binds = DMA1_CH1, local = [dma1], shared = [adc1], priority = 1)]
+    #[task(binds = DMA1_CH1, local = [dma1], priority = 1)]
     fn adc_end_read(cx: adc_end_read::Context) {
         dma::clear_interrupt(
             DmaPeriph::Dma1,

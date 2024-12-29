@@ -2,8 +2,8 @@ pub mod driver_pulse; // Module handling pulse-related logic
 pub mod driver_pwm; // Module handling PWM-related logic
 
 pub mod calibration;
+pub use calibration::angle_calibrator::AngleCalibrator;
 pub use driver_pwm::DriverPWM;
-use calibration::angle_calibrator;
 
 pub struct Motor {
     /// Motor pole count
@@ -23,17 +23,18 @@ pub struct Motor {
 }
 
 impl Motor {
-    pub fn new() -> Motor {
+    pub fn new(resistance: i32) -> Motor {
+        let resistance = if resistance <= 0 { 1 } else { resistance };
         Motor {
             pole_count: 1,
             pole_type: MotorType::UNDEFINED,
             connection: PhasePattern::NONE,
             direction: 0,
-            resistance: 1,
+            resistance,
             inductance: 1,
-            max_current: 1
+            max_current: 1,
         }
-    } 
+    }
 }
 
 /// MotorType enumeration with predefined motor types
@@ -82,7 +83,10 @@ pub trait MotorDriver {
     fn new(motor: Motor, control_mode: ControlMode) -> Self;
 
     /// Updates motor control based on the current mode and input voltages
-    fn tick(&mut self, voltg_ab: (i16, i16), supply: i16, current: [u16; 4]) -> [i16; 4];
+    fn tick_control(&mut self, ab_inpt: (i16, i16), supply: i16) -> [i16; 4];
+
+    /// Updates motor control based on the current mode and input voltages
+    fn tick_current(&mut self, current: [i16; 4]) -> (i16, i16);
 
     /// Run calibration cycle
     fn calibrate(&mut self) -> bool;
@@ -96,6 +100,8 @@ pub trait MotorDriver {
     /// Will return ab current if PWM driver and 0 if Pulse driver
     fn get_current(&mut self) -> (i16, i16);
 
+    fn get_control(&self) -> [i16; 4];
+
     /// Changes the motor type mode
     fn change_motor_mode(&mut self, motor_type: MotorType) -> bool;
 
@@ -104,6 +110,4 @@ pub trait MotorDriver {
 
     /// Changes the phase pattern mode
     fn change_control_mode(&mut self, mode: ControlMode) -> bool;
-
-    fn get_output(&self) -> [i16; 4];
 }

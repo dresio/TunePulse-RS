@@ -3,7 +3,7 @@
 
 use cortex_m_rt::entry;
 use hal::pac;
-use libm::{exp, floorf, sin, sqrtf};
+use libm::sin;
 use panic_halt as _;
 
 #[repr(C, packed)]
@@ -14,12 +14,10 @@ struct RawDataPoint {
 }
 
 use hal::{
-    clocks::Clocks,
-    gpio::{Edge, Pin, PinMode, Port, Pull},
-    pac::TIM3,
+    gpio::{Pin, PinMode, Port},
     timer::{
-        Alignment, CaptureCompareDma, CountDir, OutputCompare, TimChannel, Timer, TimerConfig,
-        TimerInterrupt, UpdateReqSrc,
+        Timer, TimerConfig,
+
     },
 };
 

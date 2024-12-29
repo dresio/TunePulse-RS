@@ -1,7 +1,7 @@
 #![no_std]
 
 pub mod inputs_dump;
-use inputs_dump::InputsDump;
+use inputs_dump::DataInputs;
 
 pub mod math_integer;
 pub mod motor_driver;
@@ -10,9 +10,9 @@ pub mod analog;
 
 use defmt_rtt as _; // Use the defmt_rtt crate for logging via RTT (Real-Time Transfer)
 
-use motor_driver::calibration::angle_calibrator::AngleCalibrator;
 use motor_driver::{
-    ControlMode, DriverPWM, DriverStatus, Motor, MotorDriver, MotorType, PhasePattern,
+    AngleCalibrator, ControlMode, DriverPWM, DriverStatus, Motor, MotorDriver, MotorType,
+    PhasePattern,
 };
 
 use crate::math_integer::filters::lpf::FilterLPF;
@@ -24,7 +24,6 @@ use analog::supply_voltage::SupplyVoltage;
 pub struct MotorController {
     motor: DriverPWM,   // Motor interface using PWM signals for control
     frequency: u16,     // Update frequency (ticks per second)
-    pwm: [i16; 4],      // Current PWM output sent to the motor
     position: Position, // Current encoder position reading
 
     driver_status: DriverStatus, // Current motor status (Calibrating, Ready, or Error)
@@ -38,6 +37,7 @@ pub struct MotorController {
     filter: FilterLPF,
     supply: SupplyVoltage,
     ticker: i32,
+    sup_check: usize,
 }
 
 // Constants used during calibration
@@ -53,8 +53,9 @@ impl MotorController {
         connection: PhasePattern,
         frequency: u16,
         max_sup_voltage: i32,
+        resistance: i32,
     ) -> Self {
-        let mut motor = Motor::new();
+        let mut motor = Motor::new(resistance);
         motor.pole_type = motor_type;
         motor.connection = connection;
         let control_mode = ControlMode::CurrentAB;
@@ -68,7 +69,6 @@ impl MotorController {
 
             angle_el: 0, // Initial electrical angle is 0
 
-            pwm: [0; 4], // Initialize PWM outputs to zero
             amplitude: 0,
 
             direction: 0, // No direction initially
@@ -79,6 +79,7 @@ impl MotorController {
 
             supply: SupplyVoltage::new(200, max_sup_voltage),
             ticker: 0,
+            sup_check: 100,
         }
     }
 
@@ -89,16 +90,11 @@ impl MotorController {
     /// * `encoder_pos` - current encoder position from the sensor
     ///
     /// This method decides whether to run normal operation or calibration logic based on the motor status.
-    pub fn tick(&mut self, voltage_on_motor: i32, encoder_pos: u16, supply: u16) -> [i16; 4] {
-        self.position.tick(encoder_pos); // Update the internal position from the sensor
-        let voltage_mv = self.supply.tick(supply).voltage_mv();
-        let duty = (voltage_on_motor << 15) / (voltage_mv + 1);
-        self.amplitude = if duty > i16::MAX as i32 {
-            i16::MAX
-        } else {
-            duty as i16
-        };
-        let sup_adc = self.supply.voltage_norm();
+    pub fn tick(&mut self, current: i32, input: DataInputs) -> [i16; 4] {
+        self.position.tick(input.angle_raw); // Update the internal position from the sensor
+        let sup_adc = self.supply.tick(input.supply_adc).voltage_norm();
+        self.amplitude = current as i16; // ma
+                                         // let sup_adc = self.supply.voltage_norm();
         match self.driver_status {
             DriverStatus::Ready => {
                 self.ticker += 1;
@@ -113,6 +109,18 @@ impl MotorController {
                 self.amplitude = 0;
             }
             DriverStatus::Calibrating => {
+                if self.sup_check > 0 {
+                    self.sup_check -= 1;
+                    if self.sup_check == 0 {
+                        if self.supply.voltage_mv() < 8000 {
+                            defmt::warn!(
+                                "SUPPLY is not enough: {}mV while at least 8000mV is needed",
+                                self.supply.voltage_mv());
+                        } else {
+                            defmt::info!("SUPPLY is OK: {}mV", self.supply.voltage_mv());
+                        };
+                    };
+                };
                 // If still calibrating, run the calibration logic
                 self.angle_el = self.angle_calibrator.tick(self.position.position());
                 if self.angle_calibrator.is_ready() {
@@ -122,10 +130,8 @@ impl MotorController {
         }
 
         // Compute the PWM signals based on the current angle_el and amplitude
-        self.pwm = self
-            .motor
-            .tick((self.angle_el as i16, self.amplitude), sup_adc, [0; 4]);
-        self.pwm // Return the updated PWM array
+        self.motor
+            .tick_control((self.angle_el as i16, self.amplitude), sup_adc)
     }
 
     /// Change the motor type mode.
@@ -143,6 +149,6 @@ impl MotorController {
     /// Get current PWM signals.
     #[inline(always)]
     pub fn get_pwm(&mut self) -> [i16; 4] {
-        self.pwm // Return the current PWM array
+        self.motor.get_control()
     }
 }
