@@ -1,4 +1,4 @@
-use defmt_rtt as _; // Use the defmt_rtt crate for logging via RTT (Real-Time Transfer)
+use custom_rtt as _; // Use the defmt_rtt crate for logging via RTT (Real-Time Transfer)
 use pwm_control::MotorPWM; // Import MotorPWM struct from the pwm_control module
 
 pub mod pulse_control; // Module handling pulse-related logic
@@ -29,7 +29,7 @@ pub struct MotorDriver {
 
     motor_status: MotorStatus, // Current motor status (Calibrating, Ready, or Error)
 
-    angle_el: u16, // Electrical angle of the motor (0..65535), used to control phase
+    angle_el: u16,  // Electrical angle of the motor (0..65535), used to control phase
     amplitude: i16, // Amplitude (voltage magnitude) used during calibration
     direction: i16, // Current rotation direction (1 for forward, -1 for backward)
     speed: i16,     // Speed (steps per tick) during calibration
@@ -63,8 +63,8 @@ impl MotorDriver {
             pwm: [0; 4],     // Initialize PWM outputs to zero
             amplitude: 6400, // Initial amplitude used during calibration, arbitrary chosen value
 
-            direction: 0,           // No direction initially
-            speed: 0, // Use the predefined calibration speed
+            direction: 0, // No direction initially
+            speed: 0,     // Use the predefined calibration speed
 
             angle_calibrator: AngleCalibrator::new(frequency),
             filter: FilterLPF::new(0, 220),
@@ -94,10 +94,15 @@ impl MotorDriver {
         match self.motor_status {
             MotorStatus::Ready => {
                 // If calibration is complete, run normal operation logic
-                self.angle_el = self.filter.tick(self.angle_calibrator.get_correction(encoder_pos as u16).1.wrapping_add(u16::MAX >> 2));
+                self.angle_el = self.filter.tick(
+                    self.angle_calibrator
+                        .get_correction(encoder_pos as u16)
+                        .1
+                        .wrapping_add(u16::MAX >> 2),
+                );
                 // let current = voltg_angle.1;
                 // self.tick_run(voltg_angle);
-                        self.amplitude = voltg_angle.1;
+                self.amplitude = voltg_angle.1;
             }
             MotorStatus::Error => {
                 // If in error state, stop driving the motor by setting amplitude to 0
@@ -120,7 +125,6 @@ impl MotorDriver {
         self.pwm // Return the updated PWM array
     }
 
-
     //---------------------------------------------------------
     // is_ready() Method Steps:
     //
@@ -131,7 +135,6 @@ impl MotorDriver {
     pub fn is_ready(&self) -> bool {
         matches!(self.motor_status, MotorStatus::Ready) // Returns true if Ready
     }
-
 
     //---------------------------------------------------------
     // change_motor_mode() and change_phase_mode() Steps:

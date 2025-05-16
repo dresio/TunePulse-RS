@@ -1,4 +1,4 @@
-use defmt_rtt as _; // Use the defmt_rtt crate for logging via RTT (Real-Time Transfer)
+use custom_rtt as _; // Use the defmt_rtt crate for logging via RTT (Real-Time Transfer)
 
 /// The main driver struct for the motor, holding all the state required for operation and calibration.
 pub struct CalibrationTable {

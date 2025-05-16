@@ -1,7 +1,7 @@
 #![no_main]
 #![no_std]
 
-use defmt_rtt as _;
+use custom_rtt as _;
 use panic_probe as _;
 
 use hal::{
@@ -155,7 +155,11 @@ mod app {
             let voltage = 1000;
 
             let duty = (voltage << 15) / (cx.local.supply.voltage_mv() + 1);
-            let pwm = if duty > i16::MAX as i32 {i16::MAX} else {duty as i16};
+            let pwm = if duty > i16::MAX as i32 {
+                i16::MAX
+            } else {
+                duty as i16
+            };
             // let mut duty = 0.2;
             // let counter = *cx.local.tick_counter;
             // Get encoder angle
@@ -164,6 +168,7 @@ mod app {
 
             // Get encoder position
             let pos = cx.local.encoder_pos.position();
+            // defmt::info!("Encoder position: {}", pos);
 
             // Calculate pwm states
             cx.local.motor.tick((speed, pwm), pos);

@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
+    "custom_rtt",
     "tunepulse_algo",
     "tunepulse_drivers",
     "app",

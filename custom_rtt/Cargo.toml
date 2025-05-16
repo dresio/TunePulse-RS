@@ -1,0 +1,9 @@
+[package]
+authors = [""]
+description = "Modified version of the defmt-rtt library to include more utilties for high speed plotting"
+name =  "custom_rtt"
+
+
+[dependencies]
+critical-section = "1.2"
+defmt = "0.3"

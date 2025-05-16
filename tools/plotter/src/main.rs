@@ -151,9 +151,11 @@ fn connect_and_read(
     let mut buf = vec![0u8; BUFFER_SIZE]; // Increased buffer size
 
     // Get the channel once, outside the loop
+    println!("Number of channels: {:?}", rtt.up_channels().len());
+
     let channel = rtt
         .up_channels()
-        .take(0)
+        .take(1)
         .ok_or("Failed to get RTT channel")?;
 
     loop {
@@ -169,6 +171,7 @@ fn connect_and_read(
         match channel.read(&mut core, &mut buf) {
             Ok(count) => {
                 let num_points = count / STRUCT_SIZE;
+                // println!("Number of points: {:?}", num_points);
 
                 let conversion_start = Instant::now();
 

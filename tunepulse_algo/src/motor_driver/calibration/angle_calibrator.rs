@@ -1,4 +1,4 @@
-use defmt_rtt as _; // Use the defmt_rtt crate for logging via RTT (Real-Time Transfer)
+use custom_rtt as _; // Use the defmt_rtt crate for logging via RTT (Real-Time Transfer)
 
 use super::CalibrationTable;
 
@@ -60,7 +60,7 @@ pub struct AngleCalibrator {
     dif_min: i32,  // Minimum difference in step measurement for consistency checks
 
     cal_table: CalibrationTable,
-    el_step_idx: u16
+    el_step_idx: u16,
 }
 
 // Constants used during calibration
@@ -117,11 +117,10 @@ impl AngleCalibrator {
             oversampled_pos: 0, // Oversampling accumulator is initially 0
             time_in_state: 0,   // No time spent in current state initially
 
-            ang_el_step: 0,         // Initialize calibration steps counter
-            direction: 0,           // No direction initially
-            speed: 1, // Use the predefined calibration speed
-            settling_time, // Use the calculated settling time
-
+            ang_el_step: 0, // Initialize calibration steps counter
+            direction: 0,   // No direction initially
+            speed: 1,       // Use the predefined calibration speed
+            settling_time,  // Use the calculated settling time
 
             init_pos: 0,       // Initial position placeholder
             temp_pos: 0,       // Temporary position placeholder
@@ -192,7 +191,7 @@ impl AngleCalibrator {
                     if Self::iter(&mut self.cal_idx) {
                         // After completing all test steps, analyze results
                         let travel = self.init_pos - self.temp_pos; // Total travel during test
-                       
+
                         let direction = travel.signum(); // Determine direction of motion
                         self.direction = direction as isize;
 
@@ -329,8 +328,16 @@ impl AngleCalibrator {
                 // Prepare for a new calibration cycle
                 self.oversampled_pos = 0; // Reset oversampling accumulator
                 self.cal_cycle_stage = CalSamplingState::Rotating; // Next state: Rotating
-                self.time_in_state = steps as usize / self.speed.abs() as usize; // Calculate how long to rotate
-                self.el_step_idx = self.angle_el.wrapping_add((steps as i32 * self.speed.signum() as i32) as u16);
+
+                // Protect against division by zero
+                if self.speed.abs() > 0 {
+                    self.time_in_state = steps as usize / self.speed.abs() as usize;
+                } else {
+                    defmt::error!("CALIBRATION: Motor is not moving! Please check connections and power supply");
+                }
+                self.el_step_idx = self
+                    .angle_el
+                    .wrapping_add((steps as i32 * self.speed.signum() as i32) as u16);
                 i32::MIN // Not finished yet
             }
 
@@ -342,7 +349,7 @@ impl AngleCalibrator {
                     // Once done rotating, move to Waiting state
                     self.cal_cycle_stage = CalSamplingState::Waiting;
                     self.time_in_state = self.settling_time; // Settle time
-                    self.angle_el = self.el_step_idx; // Fine tune angle to 
+                    self.angle_el = self.el_step_idx; // Fine tune angle to
                 }
                 i32::MIN // Still not finished
             }
@@ -458,7 +465,7 @@ impl AngleCalibrator {
         self.cal_table.correct_pos(pos)
     }
 
-        /// Calculate speed in ticks per millisecond.
+    /// Calculate speed in ticks per millisecond.
     ///
     /// # Arguments
     /// * `frequency` - Number of ticks per second
